@@ -549,7 +549,10 @@ function createBotDatabase(options = {}) {
 
   function scheduleRemoteAuthMirror(reason = 'auth-update') {
     if (!hasConfiguredRemoteAuthMirror() || shuttingDown) return false;
-    if (authMirrorTimer) clearTimeout(authMirrorTimer);
+    // Coalesce bursts without postponing forever. Resetting this timer on every
+    // Signal-key write can starve the mirror on busy sessions until process
+    // shutdown, which is too late on ephemeral/abrupt deployments.
+    if (authMirrorTimer) return true;
     authMirrorTimer = setTimeout(() => {
       authMirrorTimer = null;
       void mirrorRemoteAuthState(reason);

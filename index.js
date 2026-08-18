@@ -2041,8 +2041,12 @@ async function startBotSocket(bot) {
             // Pairing/connection success is the durability boundary: wait for a
             // real remote auth acknowledgement when a mirror is configured.
             const authMirror = await bot.db.flushRemoteAuthMirror('connection-open')
-            if (authMirror?.error) {
+            if (authMirror?.ok) {
+                log(`[ AUTH MIRROR:${bot.id} ] Auth state persisted to ${authMirror.succeeded.join(', ')}.`, 'green')
+            } else if (authMirror?.error) {
                 log(`[ AUTH MIRROR:${bot.id} ] Connection-open mirror deferred: ${authMirror.error}.`, 'yellow')
+            } else if (authMirror?.skipped && authMirror.skipped !== 'remote-not-configured') {
+                log(`[ AUTH MIRROR:${bot.id} ] Connection-open mirror skipped: ${authMirror.skipped}.`, 'yellow')
             }
             // Auto-export the session to .env / registry so restarts never need re-login
             autoExportSessionToRegistry(bot, true).catch(() => {})
