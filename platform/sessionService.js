@@ -13,7 +13,7 @@ const crypto = require('crypto');
 let engine = null;
 
 function configure(adapter) {
-    const required = ['provision', 'remove', 'stop', 'reconnect', 'reconcile', 'get', 'list', 'snapshot'];
+    const required = ['provision', 'restorePersisted', 'remove', 'stop', 'reconnect', 'reconcile', 'get', 'list', 'snapshot'];
     for (const method of required) {
         if (typeof adapter?.[method] !== 'function') {
             throw new Error(`SESSION_SERVICE_ADAPTER_MISSING:${method}`);
@@ -67,6 +67,21 @@ async function provision(input = {}, options = {}) {
     }
 }
 
+async function restorePersisted(records = []) {
+    const entries = [];
+    for (const record of Array.isArray(records) ? records : []) {
+        if (!record?.webManaged || record.removedAt || !record.botId) continue;
+        const id = String(record.botId);
+        if (record.mode === 'qr') {
+            entries.push({ id, name: `June X ${id.slice(-3)}`, qrLogin: true, restoreOnly: true });
+        } else {
+            const phone = String(record.phone || id.replace(/-\d+$/, '')).replace(/\D/g, '');
+            entries.push({ id, name: `June X ${phone.slice(-3) || id.slice(-3)}`, phone, restoreOnly: true });
+        }
+    }
+    return requireEngine().restorePersisted(entries);
+}
+
 async function stop(botId) {
     const id = String(botId);
     if (!requireEngine().get(id)) return { ok: false, reason: 'unknown', id };
@@ -95,6 +110,7 @@ module.exports = {
     configured,
     _resetForTests: resetForTests,
     provision,
+    restorePersisted,
     stop,
     reconnect,
     remove,

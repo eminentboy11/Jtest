@@ -151,6 +151,7 @@ const { runInBot, DEFAULT_BOT_ID, getCurrentBotId } = require('./utils/core/botC
 const platformBridge = require('./platform/bridge')
 const platformSessionService = require('./platform/sessionService')
 const platformLimits = require('./platform/limits')
+const { bootSessionsIndependently } = require('./utils/core/sessionBoot')
 const {
     claimSuperOwner,
     superOwnerStatusFor,
@@ -613,6 +614,28 @@ function writeJuneSessionsLineToEnv(newValue) {
  * are never restarted or otherwise touched.
  */
 // ─── Internal web/session provisioning ───────────────────────────────────────
+function restorePersistedRegistryEntries(entries = []) {
+    const registry = parseSessionsJson(process.env.JUNE_SESSIONS) || []
+    const knownIds = new Set(normalizeSessionEntries(registry).map(entry => String(entry.id)))
+    const merged = [...registry]
+    const restoredIds = []
+
+    for (const entry of Array.isArray(entries) ? entries : []) {
+        const id = String(entry?.id || '').trim()
+        if (!id || knownIds.has(id)) continue
+        merged.push({ ...entry, id, restoreOnly: true })
+        knownIds.add(id)
+        restoredIds.push(id)
+    }
+
+    if (restoredIds.length > 0) {
+        const value = JSON.stringify(merged)
+        process.env.JUNE_SESSIONS = value
+        writeJuneSessionsLineToEnv(value)
+    }
+    return { ok: true, restored: restoredIds.length, ids: restoredIds }
+}
+
 async function addSessionViaRegistry(entry = {}, _options = {}) {
     const registry = parseSessionsJson(process.env.JUNE_SESSIONS) || []
     const qrLogin = entry?.qrLogin === true
@@ -816,6 +839,7 @@ function fleetSnapshot() {
 // /dev and GC consume platform/sessionService rather than legacy chat globals.
 platformSessionService.configure({
     provision: (entry, options) => addSessionViaRegistry(entry, options),
+    restorePersisted: (entries) => restorePersistedRegistryEntries(entries),
     remove: (id) => removeSessionViaRegistry(id),
     stop: async (id) => {
         const bot = sessionManager.get(id)
@@ -2652,6 +2676,13 @@ async function bootBot(bot) {
             return startBotSocket(bot)
         }
 
+        if (bot.restoreOnly) {
+            bot.botState = 'needs-login'
+            bot.lastError = 'Persisted authentication is missing or invalid'
+            log(`[ AUTH:${bot.id} ] Persisted session has no valid local/remote auth — needs-login.`, 'yellow')
+            return null
+        }
+
         // 6. No sessionId and no stored session — login menu (interactive) or
         //    pairing / needs-login for headless and registry sessions.
         const isSoloLegacySession = sessionManager.list().length === 1 && bot.id === DEFAULT_BOT_ID
@@ -2743,6 +2774,8 @@ async function wireBotRuntime(bot) {
                 log(`[ AUTH MIRROR:${bot.id} ] Restored ${authRecovery.source} auth state (${authRecovery.keyRows} key rows).`, 'green')
             } else if (authRecovery.error) {
                 log(`[ AUTH MIRROR:${bot.id} ] Remote auth state was unavailable or invalid.`, 'yellow')
+            } else if (bot.restoreOnly) {
+                log(`[ AUTH MIRROR:${bot.id} ] Restore skipped: ${authRecovery.skipped || 'no remote auth state'}.`, 'yellow')
             }
         }
         if (hasVerifiedSQLiteAuth(bot.db._db)) {
@@ -3237,6 +3270,24 @@ async function main() {
         log('[ MULTI-SESSION ] Applied JUNE_SESSIONS from .env.', 'cyan')
     }
 
+    // Web-provisioned sessions must be known to SessionManager before per-bot
+    // MongoDB auth recovery can run. Rehydrate active platform metadata into
+    // JUNE_SESSIONS first; each entry then follows the normal isolated wire/boot
+    // path below. A registry failure never blocks explicitly configured entries.
+    if (platformBridge.platformEnabled) {
+        try {
+            const platformRegistry = require('./platform/registry')
+            await platformRegistry.init()
+            const tracked = await platformRegistry.listActive()
+            const restored = await platformSessionService.restorePersisted(tracked)
+            if (restored.restored > 0) {
+                log(`[ PLATFORM ] Rehydrated ${restored.restored} persisted web session(s) before engine boot.`, 'green')
+            }
+        } catch (error) {
+            log(`[ PLATFORM ] Persisted session registry unavailable during boot: ${error.message}`, 'yellow')
+        }
+    }
+
     const entries = loadSessionRegistry()
     const ids = entries.map((entry) => String(entry.id || DEFAULT_BOT_ID))
     const unique = [...new Set(ids)]
@@ -3253,10 +3304,11 @@ async function main() {
     // establish the deployment Super Owner (first successful connection).
     for (const entry of entries) {
         const bot = sessionManager.register(entry)
-        bot.isInitialSession = true
-        // A full process start intentionally creates a fresh generation. It may
-        // be terminated unused if verified auth connects without pairing.
-        if (bot.phone) bot.startPairingCycle('process-start')
+        bot.isInitialSession = entry.restoreOnly !== true
+        // Fresh configured phone entries may pair. Rehydrated web entries are
+        // restore-only: missing/invalid auth must become needs-login, not silently
+        // create a new pairing flow during process startup.
+        if (bot.phone && entry.restoreOnly !== true) bot.startPairingCycle('process-start')
         try {
             await wireBotRuntime(bot)
         } catch (error) {
@@ -3282,21 +3334,18 @@ async function main() {
     checkEnvStatus()
 
     // Boot every session concurrently — each session is independent and
-    // reconnects on its own; a failed session never blocks the others.
-    const bootPromises = sessionManager.list().map((bot) => (async () => {
-        try {
-            await bootBot(bot)
-        } catch (error) {
-            log(`[ SESSION:${bot.id} ] Boot failed: ${error?.message || error}`, 'red', true)
-            bot.lastError = String(error?.message || error)
-            bot.botState = 'needs-login'
-        }
-    })())
+    // reconnects on its own; a failed session becomes needs-login without
+    // preventing any peer from booting.
+    const bootPromise = bootSessionsIndependently(
+        sessionManager.list(),
+        bootBot,
+        (bot, error) => log(`[ SESSION:${bot.id} ] Boot failed: ${error?.message || error}`, 'red', true)
+    )
 
     // The dashboard serves immediately — sessions connect in the background.
     keepAliveServer = startKeepAliveServer();
 
-    await Promise.allSettled(bootPromises)
+    await bootPromise
 
     // Live registry reconciliation: seed the managed-id set, then poll so
     // sessions can be hot-added / hot-removed without a restart. Each tick

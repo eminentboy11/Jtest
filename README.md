@@ -160,6 +160,14 @@ MONGODB_URI=mongodb+srv://...
 The web-session metadata registry uses `PLATFORM_MONGODB_URI`, then
 `MONGODB_URI`, and otherwise an atomically written local JSON file.
 
+On process restart, active web-managed registry records are rehydrated into the
+engine before SessionManager registration. Each bot then independently restores
+its local or PostgreSQL/MongoDB auth snapshot and reconnects. Missing/invalid
+auth becomes `needs-login` without blocking healthy peer sessions.
+
+The retained owner command `.restart` reconnects only the current WhatsApp
+session through `sessionService`; it never exits the shared Node.js process.
+
 ## Important environment variables
 
 | Variable | Purpose |

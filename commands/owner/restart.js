@@ -1,26 +1,40 @@
 /**
- * Restart Command - Restart bot (Owner Only)
+ * Restart only the WhatsApp session that receives this command.
+ * All other sessions in the shared Node.js process remain untouched.
  */
+
+'use strict';
+
+const { getCurrentBotId } = require('../../utils/core/botContext');
+const sessionService = require('../../platform/sessionService');
 
 module.exports = {
   name: 'restart',
   aliases: ['reboot', 'reload'],
   category: 'owner',
-  description: 'Restart the bot (Owner Only)',
+  description: 'Reconnect only the current bot session (Owner Only)',
   usage: '.restart',
   ownerOnly: true,
 
-  async execute(sock, msg, args, extra) {
-    try {
-      await extra.reply('🔁 Restarting bot...');
+  async execute(_sock, _msg, _args, extra) {
+    const botId = getCurrentBotId();
+    await extra.reply('🔁 Restarting this session only...');
 
-      // Exit with code 1 so nodemon triggers an automatic restart
-      setTimeout(() => {
-        process.exit(1);
-      }, 500);
+    try {
+      const result = await sessionService.reconnect(botId, { repair: false });
+      if (!result?.ok) {
+        return extra.reply(`❌ Session restart failed: ${result?.error || result?.reason || 'unknown error'}`);
+      }
+      // The original command socket is intentionally replaced. The engine's
+      // reconnect result is authoritative; no process-level exit is used.
+      if (result.connected === false) return null;
+      try {
+        await result.sock?.sendMessage?.(extra.from, { text: '✅ Session restarted successfully.' });
+      } catch (_) {}
+      return null;
     } catch (error) {
-      console.error('Restart error:', error);
-      await extra.reply(`❌ Error restarting bot: ${error.message}`);
+      try { await extra.reply(`❌ Session restart failed: ${error.message}`); } catch (_) {}
+      return null;
     }
   },
 };
