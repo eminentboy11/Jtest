@@ -2038,6 +2038,12 @@ async function startBotSocket(bot) {
                 }
             }
             await tryMigrateFileAuth('connection-open')
+            // Pairing/connection success is the durability boundary: wait for a
+            // real remote auth acknowledgement when a mirror is configured.
+            const authMirror = await bot.db.flushRemoteAuthMirror('connection-open')
+            if (authMirror?.error) {
+                log(`[ AUTH MIRROR:${bot.id} ] Connection-open mirror deferred: ${authMirror.error}.`, 'yellow')
+            }
             // Auto-export the session to .env / registry so restarts never need re-login
             autoExportSessionToRegistry(bot, true).catch(() => {})
             const cmdCount = handler.getCommandCount ? handler.getCommandCount() : '?'
