@@ -15,6 +15,21 @@ function fakeEngine() {
         bots,
         calls,
         adapter: {
+            async restorePersisted(entries) {
+                calls.push(['restorePersisted', entries]);
+                for (const entry of entries) {
+                    if (bots.has(entry.id)) continue;
+                    bots.set(entry.id, {
+                        id: entry.id,
+                        phone: entry.phone || '',
+                        qrLogin: entry.qrLogin === true,
+                        restoreOnly: true,
+                        botState: 'disconnected',
+                        status: { id: entry.id, state: 'disconnected' },
+                    });
+                }
+                return { ok: true, restored: entries.length, ids: entries.map(entry => entry.id) };
+            },
             async provision(entry, options) {
                 calls.push(['provision', entry, options]);
                 const id = entry.id || entry.phone;
@@ -71,6 +86,24 @@ test('QR and code provisioning use the same configured engine pipeline', async (
     assert.equal(fake.calls[0][2].source, 'web');
     assert.equal(fake.calls[1][2].source, 'web');
     assert.equal(fake.bots.size, 2);
+});
+
+test('multiple persisted web sessions are reconstructed before engine boot', async () => {
+    const fake = configureFake();
+    const result = await service.restorePersisted([
+        { botId: '2348154853640', mode: 'code', phone: '2348154853640', webManaged: true, removedAt: null },
+        { botId: '2348165321909-2', mode: 'code', webManaged: true, removedAt: null },
+        { botId: 'web-a1b2c3d4e5', mode: 'qr', webManaged: true, removedAt: null },
+        { botId: 'removed', mode: 'qr', webManaged: true, removedAt: Date.now() },
+    ]);
+
+    assert.equal(result.restored, 3);
+    assert.ok(fake.bots.has('2348154853640'));
+    assert.equal(fake.bots.get('2348165321909-2').phone, '2348165321909');
+    assert.equal(fake.bots.get('web-a1b2c3d4e5').qrLogin, true);
+    assert.equal(fake.bots.has('removed'), false);
+    const entries = fake.calls.find(call => call[0] === 'restorePersisted')[1];
+    assert.ok(entries.every(entry => entry.restoreOnly === true));
 });
 
 test('failed platform commit rolls the new engine session back permanently', async () => {

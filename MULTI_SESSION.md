@@ -190,11 +190,10 @@ bot's data.
 - **Remove a session**: delete its entry from the line — it is **hot-removed**:
   only that session's socket, timers, database handle and adapter pools are
   released.
-- **Restart one session**: `.restart` from that bot restarts **only that
-  session** — its socket is torn down and rebooted from stored auth while the
-  other sessions keep running untouched (falls back to a full process restart
-  only when the per-session hook is unavailable). `.restart` also acts as the
-  explicit re-trigger for a session parked after exhausting its pairing codes.
+- **Restart one session**: `.restart` from that bot calls the internal
+  `sessionService` and restarts **only that session**. Its socket is torn down
+  and rebooted from stored auth while every other session remains untouched.
+  It never exits the shared Node.js process.
 - **Replace a session**: change its `sessionId` (optionally
   `JUNE_FORCE_SESSION_BOOTSTRAP=true` to force re-bootstrap from the id).
 - **A session logs out**: only that session's auth is quarantined/cleared and

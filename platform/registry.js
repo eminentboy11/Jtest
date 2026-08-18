@@ -104,6 +104,7 @@ async function trackSession(botId, data = {}) {
     const doc = {
         botId: String(botId),
         mode: data.mode || 'code',           // 'qr' | 'code'
+        phone: data.phone ? String(data.phone).replace(/\D/g, '') : null,
         ipHash: data.ipHash || null,
         createdAt: data.createdAt || Date.now(),
         pairedAt: null,

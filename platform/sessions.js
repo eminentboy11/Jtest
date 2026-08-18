@@ -53,7 +53,11 @@ async function provisionSlot(slot) {
             {
                 commit: async (created) => {
                     slots.bindBot(slot, created.id);
-                    await registry.trackSession(created.id, { mode: slot.mode, ipHash: slot.ipHash });
+                    await registry.trackSession(created.id, {
+                        mode: slot.mode,
+                        phone: created.phone || slot.phone || null,
+                        ipHash: slot.ipHash,
+                    });
                 },
             }
         );

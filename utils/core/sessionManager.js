@@ -86,6 +86,7 @@ class BotInstance {
         // Platform: web QR-mode sessions boot straight into the QR flow when
         // headless instead of parking as needs-login (no phone/sessionId needed).
         this.qrLogin = Boolean(entry.qrLogin);
+        this.restoreOnly = Boolean(entry.restoreOnly);
         this.interactive = Boolean(entry.interactive) || this.id === DEFAULT_BOT_ID;
         // TRUE only for sessions present at process startup (set by index.js
         // main()). Hot-added sessions never get this flag — and therefore can
