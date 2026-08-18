@@ -2956,7 +2956,7 @@ async function bootBot(bot) {
         const isSoloLegacySession = sessionManager.list().length === 1 && bot.id === DEFAULT_BOT_ID
         if (!process.stdin.isTTY && isSoloLegacySession && !bot.sessionId && !bot.phone) {
             log('❌ No sessionId/phone configured and no TTY available for interactive login.', 'red')
-            process.exit(1)
+          //  process.exit(1)
         }
 
         // 6b. Pairing budget exhausted: park until an explicit re-trigger
