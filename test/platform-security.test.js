@@ -91,6 +91,16 @@ test('file platform registry flushes atomically', () => {
   fs.rmSync(dir, { recursive: true, force: true });
 });
 
+test('developer delete-all requires explicit confirmation and is exposed in the admin UI', () => {
+  const routes = fs.readFileSync(path.join(__dirname, '..', 'platform', 'devRoutes.js'), 'utf8');
+  const page = fs.readFileSync(path.join(__dirname, '..', 'platform', 'public', 'dev.html'), 'utf8');
+  assert.match(routes, /router\.delete\('\/dev\/api\/sessions'/);
+  assert.match(routes, /confirmation[^\n]+DELETE ALL/);
+  assert.match(routes, /sessionService\.removeAll/);
+  assert.match(page, /id="deleteAllBotsBtn"/);
+  assert.match(page, /Type DELETE ALL/);
+});
+
 test('developer session actions do not interpolate ids into inline JavaScript', () => {
   const source = fs.readFileSync(path.join(__dirname, '..', 'platform', 'public', 'dev.html'), 'utf8');
   assert.doesNotMatch(source, /onclick="dev(?:Act|Del|SlotKill)/);

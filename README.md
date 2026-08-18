@@ -107,7 +107,7 @@ The developer control room can:
 - inspect platform/session/slot status;
 - stop a session while preserving authentication;
 - reconnect or repair a session;
-- permanently delete a session and its scoped artifacts;
+- permanently delete one session or the entire fleet with typed confirmation;
 - expire pairing slots;
 - run garbage collection;
 - inspect live logs.
