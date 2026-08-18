@@ -138,6 +138,16 @@ function forceExpire(slotId) {
     return slot;
 }
 
+/** Immediately remove a slot and its reverse bot lookup (rollback/cancel). */
+function discard(slotId) {
+    const slot = slots.get(slotId);
+    if (!slot) return null;
+    if (slot.botId) byBotId.delete(String(slot.botId));
+    slots.delete(slotId);
+    emit({ type: 'slot_removed', slotId, botId: slot.botId || null });
+    return slot;
+}
+
 function stats() {
     const all = list();
     return {
@@ -165,5 +175,6 @@ module.exports = {
     setFailed,
     sweep,
     forceExpire,
+    discard,
     stats,
 };

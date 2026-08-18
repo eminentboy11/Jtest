@@ -240,7 +240,13 @@
       .finally(function () { btn.disabled = false; btn.textContent = 'Get another code'; });
   };
 
-  $('cancelBtn').onclick = function () { location.reload(); };
+  $('cancelBtn').onclick = function () {
+    if (!slot || !slot.slotId || slot.status !== 'waiting') return location.reload();
+    var btn = $('cancelBtn'); btn.disabled = true; btn.textContent = 'Cancelling…';
+    fetch('/api/slots/' + encodeURIComponent(slot.slotId), { method: 'DELETE' })
+      .catch(function () {})
+      .finally(function () { location.reload(); });
+  };
 })();
 </script>
 </body>

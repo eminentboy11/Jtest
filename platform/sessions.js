@@ -6,95 +6,88 @@
  *   - streams QR / pairing-code / paired events into slots
  *   - runs garbage collection (expired slots, dead web sessions)
  *
- * All engine access goes through the engine's OWN runtime hooks
- * (__JUNE_ADD_SESSION, __JUNE_REMOVE_SESSION, __JUNE_RECONCILE_SESSIONS,
- * __JUNE_SESSION_MANAGER) — no second session-lifecycle implementation.
+ * All engine access goes through platform/sessionService, configured once by
+ * the engine. The platform owns no second socket/session lifecycle.
  */
 
 'use strict';
 
-const fs = require('fs');
-const path = require('path');
-const crypto = require('crypto');
 const qrcode = require('qrcode');
 
 const bridge = require('./bridge');
 const slots = require('./slots');
 const registry = require('./registry');
+const sessionService = require('./sessionService');
 
 const GC_INTERVAL_MS = 60_000;
 const NEEDS_LOGIN_GRACE_MS = 10 * 60_000; // web session parked needs-login -> removed after this
 const gcStats = { runs: 0, slotsExpired: 0, sessionsRemoved: 0, lastRun: null, lastError: null };
 
 function manager() {
-    return global.__JUNE_SESSION_MANAGER || null;
+    // Compatibility accessor for platform bridge code. HTTP routes no longer
+    // manipulate SessionManager directly.
+    return sessionService.configured() ? { get: sessionService.get, list: sessionService.list, snapshot: sessionService.snapshot } : null;
 }
 
 function activeSessionCount() {
-    return manager()?.list()?.length || 0;
+    return sessionService.configured() ? sessionService.activeCount() : 0;
 }
 
-// ── QR-mode registry append ───────────────────────────────────────────────────
-// Code-mode uses the engine's own __JUNE_ADD_SESSION (which validates phones).
-// QR-mode entries have no phone, so we append the {id, qrLogin} entry to the
-// JUNE_SESSIONS registry directly and reuse the engine's reconcile pipeline —
-// the same pipeline .addbot uses. normalizeSessionEntries preserves the
-// qrLogin flag through to BotInstance.
-function persistSessionsEnvLine(value) {
-    try {
-        const envPath = path.join(process.cwd(), '.env');
-        if (!fs.existsSync(envPath)) return false;
-        const content = fs.readFileSync(envPath, 'utf8');
-        if (!/^JUNE_SESSIONS=.*$/m.test(content)) return false;
-        global._suppressEnvWatcherUntil = Date.now() + 3000; // engine watcher cooperation
-        fs.writeFileSync(envPath, content.replace(/^JUNE_SESSIONS=.*$/m, `JUNE_SESSIONS=${value}`));
-        return true;
-    } catch (_) {
-        return false;
-    }
-}
-
-async function addQrSession() {
-    const id = `web-${crypto.randomBytes(5).toString('hex')}`;
-    let parsed;
-    try { parsed = JSON.parse(process.env.JUNE_SESSIONS || '[]'); } catch (_) { parsed = []; }
-    const list = Array.isArray(parsed) ? parsed : (Array.isArray(parsed?.sessions) ? parsed.sessions : []);
-    list.push({ id, name: `June X ${id.slice(-3)}`, qrLogin: true });
-    const value = JSON.stringify(list);
-    process.env.JUNE_SESSIONS = value;
-    persistSessionsEnvLine(value);
-    if (typeof global.__JUNE_RECONCILE_SESSIONS === 'function') {
-        await global.__JUNE_RECONCILE_SESSIONS();
-    }
-    return { ok: true, id };
+function provisioningMessage(reason) {
+    const reasons = {
+        'invalid-phone': 'Invalid phone number — use country code, digits only.',
+        'duplicate-sessionId': 'This session credential already exists.',
+        'duplicate-id': 'Generated session id collided — try again.',
+        'device-limit': 'This number already has the maximum linked sessions.',
+        quota: 'The platform is at capacity right now — try again later.',
+        'reconcile-failed': 'The bot runtime could not start the session — try again.',
+    };
+    return reasons[reason] || `Provisioning failed (${reason || 'unknown'}).`;
 }
 
 // ── Public provisioning ───────────────────────────────────────────────────────
 async function provisionSlot(slot) {
-    if (slot.mode === 'code') {
-        const result = await global.__JUNE_ADD_SESSION({ phone: slot.phone });
-        if (!result?.ok) {
-            const reasons = {
-                'invalid-phone': 'Invalid phone number — use country code, digits only.',
-                'duplicate-sessionId': 'This session already exists.',
-                'quota-phone': 'This number already has the maximum linked sessions.',
-                'quota-global': 'The platform is at capacity right now — try again later.',
-            };
-            throw new Error(reasons[result?.reason] || `Provisioning failed (${result?.reason || 'unknown'}).`);
+    try {
+        const result = await sessionService.provision(
+            { mode: slot.mode, phone: slot.phone },
+            {
+                commit: async (created) => {
+                    slots.bindBot(slot, created.id);
+                    await registry.trackSession(created.id, { mode: slot.mode, ipHash: slot.ipHash });
+                },
+            }
+        );
+        console.log(`[ PLATFORM ] Provisioned ${slot.mode} session "${result.id}" for slot ${slot.slotId.slice(0, 6)}…`);
+        return slot;
+    } catch (error) {
+        const botId = slot.botId;
+        if (botId) await registry.markRemoved(botId).catch(() => {});
+        slots.discard(slot.slotId);
+        const reason = error.result?.reason || String(error.message || '').replace(/^PROVISION_FAILED:/, '');
+        if (error.rollbackError) {
+            console.error(`[ PLATFORM ] Provision rollback failed for "${botId || '?'}": ${error.rollbackError.message}`);
         }
-        slots.bindBot(slot, result.id);
-    } else {
-        const result = await addQrSession();
-        slots.bindBot(slot, result.id);
+        throw new Error(provisioningMessage(reason));
     }
-    await registry.trackSession(slot.botId, { mode: slot.mode, ipHash: slot.ipHash });
-    console.log(`[ PLATFORM ] Provisioned ${slot.mode} session "${slot.botId}" for slot ${slot.slotId.slice(0, 6)}…`);
-    return slot;
+}
+
+async function cancelSlot(slotId, reason = 'public cancellation') {
+    const slot = slots.get(slotId);
+    if (!slot) return { ok: false, reason: 'unknown-slot' };
+    if (slot.status !== 'waiting') return { ok: false, reason: `slot-${slot.status}` };
+
+    if (slot.botId) {
+        const removed = await sessionService.remove(slot.botId, { reason });
+        if (!removed?.ok) return { ok: false, reason: removed?.reason || 'remove-failed' };
+        await registry.markRemoved(slot.botId).catch(() => {});
+    }
+    slots.discard(slotId);
+    return { ok: true, botId: slot.botId || null };
 }
 
 /** Request one more pairing code inside the session's existing cycle (code mode). */
 async function requestAnotherCode(slot) {
-    const bot = manager()?.get(slot.botId);
+    const bot = sessionService.get(slot.botId);
     if (!bot) throw new Error('Session no longer exists.');
     if (!bot.sock) throw new Error('Session socket is not ready yet — wait a few seconds.');
     if (bot.pairingExhausted) throw new Error('Pairing code limit reached for this session.');
@@ -168,12 +161,15 @@ function wireBridge() {
 // ── Garbage collection ────────────────────────────────────────────────────────
 async function removeWebSession(botId, why) {
     try {
-        const result = await global.__JUNE_REMOVE_SESSION(String(botId));
+        const result = await sessionService.remove(String(botId), { reason: why });
+        if (!result?.ok) throw new Error(result?.reason || 'remove-failed');
         await registry.markRemoved(botId);
         gcStats.sessionsRemoved++;
-        console.log(`[ PLATFORM:GC ] Removed web session "${botId}" (${why}) — ${result?.ok ? 'ok' : result?.reason}`);
+        console.log(`[ PLATFORM:GC ] Removed web session "${botId}" (${why}) — ok`);
+        return result;
     } catch (err) {
         console.error(`[ PLATFORM:GC ] Failed to remove "${botId}":`, err.message);
+        return { ok: false, reason: err.message };
     }
 }
 
@@ -186,7 +182,7 @@ async function runGC(trigger = 'interval') {
         gcStats.slotsExpired += expired.length;
         for (const slot of expired) {
             if (!slot.botId) continue;
-            const bot = manager()?.get(slot.botId);
+            const bot = sessionService.get(slot.botId);
             if (bot && bot.botState !== 'connected') {
                 await removeWebSession(slot.botId, 'slot expired unpaired');
             }
@@ -197,7 +193,7 @@ async function runGC(trigger = 'interval') {
         const tracked = await registry.listActive();
         const now = Date.now();
         for (const rec of tracked) {
-            const bot = manager()?.get(rec.botId);
+            const bot = sessionService.get(rec.botId);
             if (!bot) {
                 // Engine no longer knows it (removed elsewhere) — close the record.
                 if (!rec.removedAt) await registry.markRemoved(rec.botId);
@@ -235,6 +231,7 @@ module.exports = {
     manager,
     activeSessionCount,
     provisionSlot,
+    cancelSlot,
     requestAnotherCode,
     wireBridge,
     startGC,

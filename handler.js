@@ -247,24 +247,10 @@ const getLiveGroupMetadata = async (sock, groupId) => {
 // Alias for backward compatibility (non-admin features use cached)
 const getGroupMetadata = getCachedGroupMetadata;
 
-// Helper functions
-// Ownership model:
-//   isOwner          — SESSION-level owner check (config.ownerNumber) UNION the
-//                      deployment Super Owner (so the Super Owner can operate
-//                      the entire deployment).
-//   isPlatformOwner  — PLATFORM-level sender check (superOwnerOnly commands
-//                      such as .addbot): resolves against the persisted
-//                      deployment Super Owner; the legacy config.ownerNumber
-//                      list authorizes only during bootstrap.
-//   platformGatePassed — sender check plus current-session check, so only the
-//                      Super Owner bot session executes fleet-management work.
-//   isSuperOwner     — strict match against the persisted Super Owner.
+// Session-level ownership for retained WhatsApp bot commands. Web platform
+// provisioning and fleet management are authenticated separately under /dev.
 const ownership = require('./utils/ownership');
-const {
-  isPlatformOwner: platformOwnerCheck,
-  isPlatformOwnerForSession: platformOwnerForSessionCheck,
-  isSuperOwner: superOwnerCheck,
-} = ownership;
+const { isSuperOwner: superOwnerCheck } = ownership;
 
 const isOwner = (sender) => {
   if (!sender) return false;
@@ -292,15 +278,7 @@ const isOwner = (sender) => {
   return false;
 };
 
-// Thin re-exports so gates stay readable.
-const isPlatformOwner = (sender) => platformOwnerCheck(sender);
 const isSuperOwner = (sender) => superOwnerCheck(sender);
-
-// Platform-command gate: the sender must be the deployment Super Owner AND
-// the current bot session must be the Super Owner session. This prevents every
-// connected bot from replying to the same fleet-management command.
-const platformGatePassed = (_msg, resolvedSender, sock) =>
-  platformOwnerForSessionCheck(resolvedSender, sock?.user?.id);
 
 const isSudo = (sender) => {
   if (!sender) return false;
@@ -808,46 +786,9 @@ const handleMessage = async (sock, msg) => {
     // Return early for non-group messages with no recognizable content
     if (!content || actualMessageTypes.length === 0) return;
 
-    // Button / native-flow response. gifted-btns and current WhatsApp send
-    // interactiveResponseMessage.paramsJson, not the old buttonsResponseMessage.
-    // Live addbot-flow taps: WhatsApp button replies sometimes arrive with an
-    // EMPTY selectedId (only the label text is echoed back). Route by label
-    // too, so Copy/Cancel taps can never fall through silently.
-    const _tapReply = msg?.message?.templateButtonReplyMessage
-        || msg?.message?.listResponseMessage;
-    if (_tapReply) {
-        const displayText = _tapReply.selectedDisplayText
-            || _tapReply.singleSelectReply?.selectedRowId
-            || '';
-        const flowTapId = extractButtonId(content, msg) || displayText;
-        const isFlowTap = String(flowTapId).startsWith('addbot_')
-            || /copy code|cancel/i.test(String(displayText || ''));
-        if (isFlowTap) {
-            const addbotButtonHook = global.__JUNE_ADD_BOT_BUTTON;
-            if (typeof addbotButtonHook === 'function') {
-                await addbotButtonHook(flowTapId, from, sender, msg).catch((e) => {
-                    console.error('addbot button hook error:', e?.message || e);
-                });
-            }
-            return;
-        }
-    }
-
+    // Generic button/native-flow command routing for retained bot features.
     const buttonId = extractButtonId(content, msg);
     if (buttonId) {
-
-      // Live addbot-flow buttons (copy code / cancel) are handled by the
-      // session bridge in index.js — never routed as commands.
-      if (String(buttonId).startsWith('addbot_')) {
-        const addbotButtonHook = global.__JUNE_ADD_BOT_BUTTON;
-        if (typeof addbotButtonHook === 'function') {
-          await addbotButtonHook(buttonId, from, sender, msg).catch((e) => {
-            console.error('addbot button hook error:', e?.message || e);
-          });
-        }
-        return;
-      }
-
       // Helper to build the standard extra object for command execution
       const makeExtra = async () => ({
         from,
@@ -855,7 +796,6 @@ const handleMessage = async (sock, msg) => {
         isGroup,
         groupMetadata,
         isOwner: isOwner(sender),
-         isPlatformOwner: platformGatePassed(msg, sender, sock),
         isAdmin: await isAdmin(sock, sender, from, groupMetadata),
         isBotAdmin: await isBotAdmin(sock, from, groupMetadata),
         isMod: isMod(sender),
@@ -913,16 +853,6 @@ const handleMessage = async (sock, msg) => {
           extra.isOwner = msg.key.fromMe || extra.isOwner;
           extra.isSudo = extra.isOwner || extra.isSudo;
           extra.isMod = extra.isSudo;
-           if (dynCmd.superOwnerOnly && !extra.isPlatformOwner) {
-             // The Super Owner's command can be visible to every connected
-             // session in a group. Only the designated session should reply;
-             // other sessions stay silent instead of creating duplicate
-             // denial messages.
-             if (!isPlatformOwner(sender)) {
-               await sock.sendMessage(from, { text: config.messages.superOwnerOnly }, { quoted: msg });
-             }
-             return;
-           }
           if (dynCmd.ownerOnly && !extra.isOwner && !extra.isSudo) {
             await sock.sendMessage(from, { text: config.messages.ownerOnly }, { quoted: msg });
             return;
@@ -1071,7 +1001,6 @@ const handleMessage = async (sock, msg) => {
                   isGroup,
                   groupMetadata,
                   isOwner: isOwner(sender),
-        isPlatformOwner: isPlatformOwner(sender),
                   isAdmin: await isAdmin(sock, sender, from, groupMetadata),
                   isBotAdmin: await isBotAdmin(sock, from, groupMetadata),
                   isMod: isMod(sender),
@@ -1102,7 +1031,6 @@ const handleMessage = async (sock, msg) => {
             isGroup,
             groupMetadata,
             isOwner: isOwner(sender),
-        isPlatformOwner: isPlatformOwner(sender),
             isAdmin: await isAdmin(sock, sender, from, groupMetadata),
             isBotAdmin: await isBotAdmin(sock, from, groupMetadata),
             isMod: isMod(sender),
@@ -1135,7 +1063,6 @@ const handleMessage = async (sock, msg) => {
             isGroup,
             groupMetadata,
             isOwner: isOwner(sender),
-        isPlatformOwner: isPlatformOwner(sender),
             isAdmin: await isAdmin(sock, sender, from, groupMetadata),
             isBotAdmin: await isBotAdmin(sock, from, groupMetadata),
             isMod: isMod(sender),
@@ -1356,11 +1283,6 @@ const handleMessage = async (sock, msg) => {
 
     const senderIsOwner = msg.key.fromMe || isOwner(resolvedSender);
     const senderIsSudo  = senderIsOwner || isSudo(resolvedSender);
-    // Platform authority is STRICTLY number-based. No fromMe shortcut: the
-    // account holder of a session is not the deployment Super Owner just
-    // because they message the bot's own chat. (fromMe still grants
-    // SESSION-level owner rights via isOwner — separate concept.)
-    const senderIsPlatformOwner = platformGatePassed(msg, resolvedSender, sock);
 
     // Self mode — bot only responds to its own messages (self-bot mode)
     if (config.selfMode && !msg.key.fromMe) return;
@@ -1381,15 +1303,7 @@ const handleMessage = async (sock, msg) => {
       }
     }
 
-    // Permission checks
-    // superOwnerOnly = platform-level command (.addbot …): resolves ONLY
-    // against the persisted deployment Super Owner (legacy config.ownerNumber
-    // authorizes just during the pre-establishment bootstrap window).
-    if (command.superOwnerOnly && !senderIsPlatformOwner) {
-      if (!isPlatformOwner(resolvedSender)) return;
-      return;
-    }
-
+    // Permission checks for retained WhatsApp bot commands.
     if (command.ownerOnly && !senderIsOwner && !senderIsSudo) {
       return sock.sendMessage(from, { text: config.messages.ownerOnly }, { quoted: msg });
     }
@@ -2659,8 +2573,6 @@ module.exports = {
   getCachedArSettings,
   isOwner,
   isSuperOwner,
-  isPlatformOwner,
-  platformGatePassed,
   isAdmin,
   isBotAdmin,
   isMod,

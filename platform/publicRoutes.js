@@ -79,6 +79,21 @@ router.get('/api/slots/:slotId', (req, res) => {
     res.json({ ok: true, slot: slots.publicView(slot) });
 });
 
+// ── Cancel an in-progress public slot and its temporary engine session ────────
+router.delete('/api/slots/:slotId', async (req, res) => {
+    try {
+        const result = await sessions.cancelSlot(req.params.slotId);
+        if (!result.ok) {
+            const status = result.reason === 'unknown-slot' ? 404 : 409;
+            return res.status(status).json({ error: result.reason });
+        }
+        res.json({ ok: true });
+    } catch (error) {
+        console.error('[ PLATFORM ] Slot cancellation error:', error.message);
+        res.status(500).json({ error: 'Could not cancel this pairing session.' });
+    }
+});
+
 // ── Request an additional pairing code (code mode) ────────────────────────────
 router.post('/api/slots/:slotId/code', async (req, res) => {
     const slot = slots.get(req.params.slotId);
