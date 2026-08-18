@@ -1,168 +1,235 @@
-# June X — Multi-WhatsApp Bot (Multi-Session Edition)
+# June X Dashboard Edition
 
-> WhatsApp MD-style multi-command bot built on **Baileys** — now running **multiple WhatsApp sessions in ONE process**.
-> Forked from [supreme-Lord2/xjx](https://github.com/supreme-Lord2/xjx) (June X Ultra). This edition adds a complete multi-session core.
+A web-managed, multi-session WhatsApp bot platform built on Baileys.
 
----
+- Public visitors provision a bot through QR or pairing code at `/`.
+- Developers manage the fleet through the password-protected `/dev` control room.
+- The existing June X multi-session engine remains responsible for sockets,
+  authentication, databases, pairing and reconciliation.
+- WhatsApp fleet-management commands are not part of this edition.
 
-## ✨ What's new — Multi-Session
+## Architecture
 
-Run 2, 3, 10… WhatsApp numbers from a single deployment. Every session is a fully independent bot:
+```text
+Public pairing gateway          Developer control room
+/                               /dev
+        │                            │
+        └──────── sessionService ────┘
+                         │
+                  SessionManager
+                         │
+       ┌─────────────────┼─────────────────┐
+       │                 │                 │
+   Baileys socket    SQLite/auth      PG/Mongo mirror
+```
 
-| Per session | Details |
-|---|---|
-| 🔌 Socket & auth | own Baileys socket, Signal keys, creds — `session/` (main) or `sessions/<id>/` |
-| 🗄️ Database | own SQLite file `database/june-<id>.db` — notes, settings, warnings, anti-features are fully isolated |
-| ⚙️ Settings | own prefix, botName, bot mode, auto-react, presence, menu style |
-| 🔁 Reconnect | own 408/503/500/409/440 backoff & conflict state machine — one bot reconnecting never touches the others |
-| ☁️ Remote mirror | own `bot_id` rows in Postgres / MongoDB |
-| 📦 Memory | per-bot caches, message stores, status queues, heartbeat |
+`platform/sessionService.js` is the platform's only lifecycle interface. It
+supports QR/code provisioning, stop, reconnect, permanent deletion, status and
+reconciliation. Public routes, `/dev`, and GC do not manipulate legacy WhatsApp
+management commands or raw SessionManager boot internals.
 
-**Commands needed zero changes.** Every command (including `commands/notes/mynote.js`) reads `config.` and `database.` through a context layer (`utils/botContext.js`), so it automatically operates on the bot that received the message.
+## Features
 
-📖 Full guide: **[MULTI_SESSION.md](MULTI_SESSION.md)** · Tests: `node test/multi-session.test.js`
+- QR and phone-number pairing-code provisioning
+- Three-code pairing budget with stale-socket and concurrency protection
+- Multiple independent sessions per process
+- Up to four linked sessions for the same WhatsApp number
+- Per-session SQLite auth, settings and runtime state
+- Optional PostgreSQL and MongoDB mirrors
+- Public slot isolation over WebSocket and polling
+- Pairing-slot cancellation and failed-provisioning rollback
+- Developer session list, stop, reconnect, permanent delete and GC
+- Live developer logs
+- Per-IP creation limits and one shared platform capacity
+- Developer login throttling and expiring bearer tokens
+- WebSocket connection limits and unauthenticated timeouts
+- Automatic cleanup of abandoned web pairing sessions
 
----
+## Requirements
 
-## 🚀 Quick start (local / VPS)
+- Node.js 20.9+ recommended (minimum declared runtime remains Node.js 18)
+- npm
+- FFmpeg for media commands
+- Optional PostgreSQL and/or MongoDB for durable remote persistence
+
+## Installation
 
 ```bash
-git clone https://github.com/eminentboy11/June-x-multi-WhatsApp-.git
-cd June-x-multi-WhatsApp-
+git clone https://github.com/eminentboy11/Jtest.git
+cd Jtest
 npm install
+cp .env.example .env
+```
 
-# optional: copy .env.example -> .env and fill in your JUNE_SESSIONS registry
-nano .env
+Set at minimum:
 
+```env
+JUNE_PLATFORM=true
+JUNE_SESSIONS=[]
+ADMIN_PASSWORD=use-a-long-unique-password
+```
+
+Then start:
+
+```bash
 npm start
 ```
 
-### Define your sessions
-
-`JUNE_SESSIONS` is the **only** session configuration mechanism. One session
-and multiple sessions use exactly the same registry and boot pipeline — the
-only difference is the number of entries.
-
-**`JUNE_SESSIONS` in `.env`** (or as a panel variable) is the **only** registry.
-The value is one line of JSON:
-
-```env
-JUNE_SESSIONS=[{"sessionId":"JUNE-MD:~...","phone":"2348154853640"},{"sessionId":"","phone":"2348165321909"}]
-```
-
-- **Hot-reload**: editing the `JUNE_SESSIONS` line in `.env` while the bot
-  runs adds/removes sessions live (within seconds) — no restart.
-- The line **must be one line of JSON** (multi-line values do not parse in `.env`).
-- With no registry at all, the bot boots a single default session with the
-  first-run login flow (interactive menu, or a clear exit message headless).
-
-#### Session entry fields
-
-| Field | Required | Meaning |
-|---|---|---|
-| `sessionId` | no | `JUNE-MD:~…`, `Ultra-X:~…`, `June-Ultra:~…` or `June::~…` (auto-login) |
-| `phone` | expected | digits with country code → **pairing-code login** + self-healing fallback; the bot's identity key |
-| `id` | **auto** | derived from the phone; duplicate numbers get `-2`, `-3` suffixes automatically. Optional explicit override for a stable id (e.g. client bots) |
-| `name` | **auto** | derived as `June X <last3>` (e.g. `June X 640`) for the dashboard/logs. An explicit name also changes that bot's `botName` |
-
-- Only `phone` given → fresh pairing-code login.
-- Only `sessionId` given → classic auto-login (no self-healing fallback).
-- **Both** → sessionId first, phone auto-fallback.
-- **Neither** → session is parked as `needs-login` on the dashboard.
-- The old full format (`id`/`name`/`sessionId`/`phone` on every entry) still
-  works unchanged — `id`/`name` are just overrides now.
-
-## 🖥️ Dashboard & health
-
-- `GET /` — live dashboard, one card per session (state, account, connected time), auto-refresh
-- `GET /health` — plain OK
-- `GET /health/details` — JSON: all sessions, database health, auth stats, telemetry
-
----
-
-## ⚡ Features
-
-- **~300 commands in 21 categories** — admin (59), owner (51), general (41), design (30), media (25), fun (20), textmaker (19), tools (18), stalker, anime, ai, aivideo, ephoto, convert, notes, sports, reaction, religion, movies, utility
-- **Anti-features**: antilink, antispam, antibadword, antibot, antiviewonce, antiforward, antitag, antidelete (+ status), anticall, antigif/image/sticker/video/audio/contact, autosticker, welcome/goodbye, hide-tag, and more
-- **Auth**: SQLite-backed Signal keys with integrity validation, backups, quarantines, session-ID fingerprints, remote auth mirror (Postgres / MongoDB) with recovery
-- **Notes system** (`addnote` / `mynotes`) per user, per bot
-- Group stats, warning system, muting, bot modes, font styles, sticker tools, yt/media downloaders, TTS, ephoto360/textmaker/design logos
-- Auto status view/react, always-online, auto-download status, pairing-code login with **sessionId+phone auto-fallback**, per-session **pairing-code budget**, web-based QR/code provisioning, per-session **console log prefixes** (`[ JUNEX ULTRA 909 ]`), `.env` watcher and graceful shutdown
-- **Startup report** is a single-session presentation feature: shown only when the process starts with exactly 1 session — skipped entirely with 2+ sessions, and never shown for runtime hot-added sessions
-- Web fleet management is handled by the public pairing gateway and password-protected `/dev` control room, not WhatsApp session-management commands.
-
----
-
-## 📦 Deploy (panel ZIP upload)
-
-If you update an existing June X deployment via ZIP upload, upload/overwrite these files at the matching paths:
+Open:
 
 ```text
-config.js
-database.js
-handler.js
-index.js
-.gitignore
-commands/admin/antispam.js
-commands/owner/alwaysonline.js
-commands/owner/antidelete.js
-commands/owner/antideletestatus.js
-commands/owner/autostatusemoji.js
-commands/owner/autostatusreact.js
-commands/owner/autostatusview.js
-utils/groupstats.js
-utils/jidHelper.js
-utils/juneDb/mongoAdapter.js
-utils/juneDb/pgAdapter.js
-utils/botContext.js          (new)
-utils/sessionManager.js      (new)
-MULTI_SESSION.md             (new)
-test/multi-session.test.js   (new)
+http://localhost:5000/       Public pairing gateway
+http://localhost:5000/dev    Developer control room
+http://localhost:5000/status Engine status dashboard
+http://localhost:5000/health Health check
 ```
 
-Then restart. Existing installs keep their `session/` folder and `june-ultra.db` untouched.
+## Public API
 
-### Environment variables
+| Method | Route | Purpose |
+|---|---|---|
+| `GET` | `/` | Pairing page |
+| `POST` | `/api/slots` | Create a QR/code pairing slot |
+| `GET` | `/api/slots/:slotId` | Poll slot status |
+| `POST` | `/api/slots/:slotId/code` | Request another pairing code |
+| `DELETE` | `/api/slots/:slotId` | Cancel and clean up an unpaired slot |
 
-See **`.env.example`** for a ready-to-copy template (single legacy session, multi-session, external databases, pairing tuning). The bot auto-creates the same template as `.env` on first boot when none exists.
+Slot IDs are random bearer capabilities. Pairing API responses are marked
+`Cache-Control: no-store`.
+
+## Developer API
+
+Login with `ADMIN_PASSWORD` at `/dev`. Successful login issues an in-memory,
+eight-hour bearer token.
+
+The developer control room can:
+
+- inspect platform/session/slot status;
+- stop a session while preserving authentication;
+- reconnect or repair a session;
+- permanently delete a session and its scoped artifacts;
+- expire pairing slots;
+- run garbage collection;
+- inspect live logs.
+
+Login failures are rate-limited per resolved client IP. Developer WebSockets
+revalidate token expiry and enforce global/per-IP connection limits.
+
+## Capacity
+
+`PLATFORM_MAX_BOTS` is the canonical Dashboard Edition capacity and applies to
+both QR and pairing-code provisioning. `JUNE_MAX_SESSIONS` is retained only as
+a backward-compatible fallback when `PLATFORM_MAX_BOTS` is not set.
+
+```env
+PLATFORM_MAX_BOTS=30
+JUNE_MAX_SESSIONS=30
+```
+
+Per-number WhatsApp linked-device limit:
+
+```text
+phone
+phone-2
+phone-3
+phone-4
+```
+
+## Persistence
+
+SQLite remains the local source of truth. Runtime databases and authentication
+files are deliberately excluded from Git.
+
+Ignored runtime locations include:
+
+```text
+database/
+session/
+sessions/
+data/platform-registry.json
+.env
+```
+
+For durable deployments, configure PostgreSQL and/or MongoDB:
+
+```env
+DATABASE_URL=postgres://...
+MONGODB_URI=mongodb+srv://...
+```
+
+The web-session metadata registry uses `PLATFORM_MONGODB_URI`, then
+`MONGODB_URI`, and otherwise an atomically written local JSON file.
+
+## Important environment variables
 
 | Variable | Purpose |
 |---|---|
-| `JUNE_SESSIONS` | the sole session registry (JSON, one line in `.env`) — hot-reloadable live |
-| `JUNE_BOT_ID` | default session id / mirror `bot_id` |
-| `DATABASE_URL` | PostgreSQL mirror (per-bot rows separated by `bot_id` automatically) |
-| `MONGODB_URI` / `MONGO_URL` | MongoDB mirror (per-bot `botId` records) |
-| `JUNE_DB_FILE` / `JUNE_DB_DIR` | database path for the default session |
-| `JUNE_FORCE_SESSION_BOOTSTRAP` | `true` = force re-bootstrap from `sessionId` |
-| `JUNE_EXPORT_SESSION_TO_ENV` | `true` = auto-export refreshed creds back to `.env`'s `JUNE_SESSIONS` line |
-| `JUNE_PAIRING_MAX_ATTEMPTS` | pairing codes per login/recovery cycle (default **3**); after the limit the session parks as `needs-login` for developer reconnect/delete |
-| `JUNE_PAIRING_STABILIZE_MS` | socket-stabilize wait before requesting an initial pairing code (default 3000) |
-| `JUNE_MAX_SESSIONS` | internal/web provisioning quota — max total sessions (default **10**); per-number WhatsApp device cap (4) always applies |
-| `JUNE_SESSIONS_POLL_MS` | hot-add/hot-remove registry poll interval (default 15000) |
-| `PORT` | dashboard port (default 5000) |
+| `ADMIN_PASSWORD` | Unlocks `/dev` |
+| `PLATFORM_MAX_BOTS` | Shared QR/code fleet capacity |
+| `PLATFORM_CREATES_PER_HOUR` | Public creations per IP per hour |
+| `PLATFORM_SLOT_TTL_MIN` | Pairing slot lifetime |
+| `PLATFORM_LOGIN_ATTEMPTS` | Failed `/dev` attempts before blocking |
+| `PLATFORM_LOGIN_WINDOW_MIN` | Login failure window |
+| `PLATFORM_LOGIN_BLOCK_MIN` | Login block duration |
+| `PLATFORM_MAX_WS_CONNECTIONS` | Global WebSocket cap |
+| `PLATFORM_MAX_WS_PER_IP` | Per-IP WebSocket cap |
+| `PLATFORM_WS_AUTH_TIMEOUT_SEC` | Time to authenticate/select a slot |
+| `PLATFORM_TRUST_PROXY_HOPS` | Explicit trusted reverse-proxy hop count |
+| `JUNE_SESSIONS` | Internal session registry; `[]` is valid |
+| `JUNE_PAIRING_MAX_ATTEMPTS` | Pairing-code cap, default 3 |
+| `DATABASE_URL` | PostgreSQL mirror |
+| `MONGODB_URI` | MongoDB mirror |
+| `PLATFORM_MONGODB_URI` | Optional dedicated platform registry MongoDB |
+| `TELEGRAM_BOT_TOKEN` | Optional Telegram sticker command integration |
+| `OPENWEATHER_API_KEY` | Optional weather command integration |
 
----
+See `.env.example` for the complete template.
 
-## 🗄️ External auth mirror (unchanged from June X)
+## Reverse proxy configuration
 
-Verified local SQLite auth rows (`session_creds`, `session_keys`, `session_auth_meta`) are mirrored directly to configured PostgreSQL (`session_auth_state` table) and/or MongoDB (`auth-state` record in `june_mirror_records`), per bot. If local auth is lost and no usable file session exists, the latest remote auth state is restored before startup. A deliberate logout/session clear deletes the remote auth state too.
+The platform does not blindly trust `X-Forwarded-For`.
 
----
+- Render, Heroku and Railway default to one trusted proxy hop.
+- Direct local/VPS deployments default to no trusted proxy.
+- Custom proxy chains must set `PLATFORM_TRUST_PROXY_HOPS` explicitly.
 
-## 🧪 Tests
+## Tests
 
 ```bash
-node test/multi-session.test.js
+node --test test/*.test.js
 ```
 
-Covers ALS routing, per-bot databases/KV (notes), settings, config proxy, handler caches, `mynote.js` end-to-end isolation, registry parsing and per-bot adapters.
+Current test coverage includes:
 
----
+- QR and pairing-code provisioning
+- failed-provisioning rollback
+- public cancellation
+- two-session isolation
+- stop and reconnect
+- permanent deletion
+- zero-session startup
+- adapter unregister
+- shared capacity
+- login throttling
+- trusted proxy behavior
+- no-store responses
+- WebSocket security controls
+- atomic registry persistence
+- embedded-secret regression checks
 
-## 👑 Credits
+## Security notes
 
-- Original June X Ultra: **Supreme** ([github.com/supreme-Lord2](https://github.com/supreme-Lord2))
-- Multi-session core: this fork
-- Built with [Baileys](https://github.com/WhiskeySockets/Baileys), better-sqlite3, express
+- Never commit `.env`, SQLite databases, WAL/SHM files or session directories.
+- Rotate any credential that was previously committed to repository history.
+- Use a unique, high-entropy `ADMIN_PASSWORD`.
+- Restrict `/dev` at the reverse proxy as defense in depth where possible.
+- Review `npm audit` regularly; some legacy media dependencies may require
+  replacement rather than safe in-place upgrades.
+
+## License and credits
+
+- Original June X Ultra: Supreme
+- Multi-session and Dashboard Edition: this project
+- Core libraries: Baileys, Express, better-sqlite3, PostgreSQL, MongoDB
 
 License: MIT

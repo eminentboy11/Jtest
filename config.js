@@ -30,7 +30,7 @@ const baseConfig = {
     updateZipUrl: 'https://github.com/Vinpink2/June-X-Ultra/archive/refs/heads/main.zip',
     
     packname: '',
-    telegramToken: '8316875590:AAGXXYbt2OIn_hORS0s9RlW5n3e5W5-0YPQ',
+    telegramToken: process.env.TELEGRAM_BOT_TOKEN || '',
     
     selfMode: false,
     autoRead: false,

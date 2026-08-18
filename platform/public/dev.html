@@ -120,6 +120,7 @@
 
   function H() { return { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' }; }
   function esc(t) { var e = document.createElement('span'); e.textContent = String(t == null ? '' : t); return e.innerHTML; }
+  function attr(t) { return esc(t).replace(/"/g, '&quot;').replace(/'/g, '&#39;'); }
   function fmtUp(s) { var d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60); return (d?d+'d ':'')+h+'h '+m+'m'; }
   function ago(ts) { if(!ts) return '—'; var s=Math.floor((Date.now()-ts)/1000); if(s<60) return s+'s'; if(s<3600) return Math.floor(s/60)+'m'; return Math.floor(s/3600)+'h'; }
 
@@ -198,29 +199,41 @@
           '<td>' + (s.webManaged ? 'gateway' : 'registry') + '</td>' +
           '<td>' + esc(pairing) + '</td>' +
           '<td class="actions-cell">' +
-            '<button class="btn ghost sm" onclick="devAct(\'reconnect\',\'' + esc(s.id) + '\')">Reconnect</button>' +
-            '<button class="btn ghost sm" onclick="devAct(\'stop\',\'' + esc(s.id) + '\')">Stop</button>' +
-            '<button class="btn danger sm" onclick="devDel(\'' + esc(s.id) + '\')">Delete</button>' +
+            '<button class="btn ghost sm" data-session-action="reconnect" data-session-id="' + attr(s.id) + '">Reconnect</button>' +
+            '<button class="btn ghost sm" data-session-action="stop" data-session-id="' + attr(s.id) + '">Stop</button>' +
+            '<button class="btn danger sm" data-session-action="delete" data-session-id="' + attr(s.id) + '">Delete</button>' +
           '</td></tr>';
       }).join('');
     }).catch(function () {});
   }
 
-  window.devAct = function (action, id) {
+  function devAct(action, id) {
     fetch('/dev/api/sessions/' + encodeURIComponent(id) + '/' + action, { method:'POST', headers:H() })
       .then(function (r) { return r.json().then(function (d) { return { ok:r.ok, d:d }; }); })
       .then(function (res) { flash('sessMsg', res.ok, res.ok ? (res.d.message || action + ' ok') : (res.d.error || 'failed')); refreshSessions(); });
-  };
-  window.devDel = function (id) {
+  }
+  function devDel(id) {
     if (!confirm('DELETE session "' + id + '"?\n\nThis permanently removes its auth, database and registry entry.')) return;
     fetch('/dev/api/sessions/' + encodeURIComponent(id), { method:'DELETE', headers:H() })
       .then(function (r) { return r.json().then(function (d) { return { ok:r.ok, d:d }; }); })
       .then(function (res) { flash('sessMsg', res.ok, res.ok ? 'Session deleted.' : (res.d.error || 'failed')); refreshAll(); });
-  };
-  window.devSlotKill = function (slotId) {
+  }
+  $('sessionsBody').addEventListener('click', function (event) {
+    var button = event.target.closest('button[data-session-action]');
+    if (!button) return;
+    var action = button.dataset.sessionAction;
+    var id = button.dataset.sessionId;
+    if (action === 'delete') devDel(id); else devAct(action, id);
+  });
+
+  function devSlotKill(slotId) {
     fetch('/dev/api/slots/' + encodeURIComponent(slotId), { method:'DELETE', headers:H() })
       .then(function () { refreshSlots(); });
-  };
+  }
+  $('slotsBody').addEventListener('click', function (event) {
+    var button = event.target.closest('button[data-slot-id]');
+    if (button) devSlotKill(button.dataset.slotId);
+  });
 
   function flash(id, ok, text) {
     var el = $(id); el.textContent = (ok ? '✅ ' : '❌ ') + text;
@@ -245,7 +258,7 @@
           '<td>' + esc(s.botId || '—') + '</td>' +
           '<td>' + s.attemptsUsed + '/' + s.attemptsLimit + '</td>' +
           '<td>' + left + '</td>' +
-          '<td>' + (s.status === 'waiting' ? '<button class="btn danger sm" onclick="devSlotKill(\'' + esc(s.slotId) + '\')">Expire</button>' : '') + '</td>' +
+          '<td>' + (s.status === 'waiting' ? '<button class="btn danger sm" data-slot-id="' + attr(s.slotId) + '">Expire</button>' : '') + '</td>' +
           '</tr>';
       }).join('');
     }).catch(function () {});

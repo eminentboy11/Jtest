@@ -1,0 +1,36 @@
+# Environment / secrets
+.env
+.env.*
+!.env.example
+
+# Dependencies and generated output
+node_modules/
+coverage/
+dist/
+build/
+*.log
+
+# Runtime WhatsApp authentication and databases
+/session/
+/sessions/
+/database/
+*.db
+*.db-shm
+*.db-wal
+*.db.backup
+
+# Runtime platform metadata
+/data/platform-registry.json
+/data/platform-registry.json.tmp-*
+
+# Temporary media/runtime files
+/tmp/
+/temp/
+*.tmp
+*.temp
+
+# Editor / OS
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

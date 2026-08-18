@@ -225,6 +225,11 @@ function startGC() {
     console.log('[ PLATFORM ] GC started (every 60s)');
 }
 
+function stopGC() {
+    if (_gcTimer) clearInterval(_gcTimer);
+    _gcTimer = null;
+}
+
 function getGcStats() { return { ...gcStats }; }
 
 module.exports = {
@@ -235,6 +240,7 @@ module.exports = {
     requestAnotherCode,
     wireBridge,
     startGC,
+    stopGC,
     runGC,
     getGcStats,
     removeWebSession,

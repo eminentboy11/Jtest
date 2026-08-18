@@ -1,26 +1,44 @@
 {
-  "name": "June X Ultra",
-  "description": "June X Ultra - WhatsApp MD Multi-Device Bot powered by Baileys (multi-session)",
-  "repository": "",
+  "name": "June X Dashboard Edition",
+  "description": "Web-managed multi-session WhatsApp bot platform with public QR/code pairing and a protected developer control room",
+  "repository": "https://github.com/eminentboy11/Jtest",
   "logo": "",
-  "keywords": ["whatsapp", "baileys", "bot", "node", "md", "june-ultra", "multi-session"],
+  "keywords": ["whatsapp", "baileys", "bot", "dashboard", "multi-session", "pairing"],
   "stack": "heroku-24",
   "buildpacks": [
-    {
-      "url": "https://github.com/heroku/heroku-buildpack-nodejs.git"
-    }
+    { "url": "https://github.com/heroku/heroku-buildpack-nodejs.git" }
   ],
   "formation": {
-    "web": {
-      "quantity": 1,
-      "size": "basic"
-    }
+    "web": { "quantity": 1, "size": "basic" }
   },
   "env": {
+    "JUNE_PLATFORM": {
+      "description": "Enable the Dashboard Edition web platform",
+      "value": "true"
+    },
     "JUNE_SESSIONS": {
-      "description": "Session registry (JSON). One session: [{\"sessionId\":\"JUNE-MD:~...\",\"phone\":\"2348...\"}]. Multiple: add more entries. sessionId accepts JUNE-MD:~<base64>, Ultra-X:~<base64>, June-Ultra:~<base64>, June::~<base64>; phone uses pairing-code login.",
-      "required": false,
-      "value": ""
+      "description": "Internal session registry; an empty dashboard fleet is []",
+      "value": "[]"
+    },
+    "ADMIN_PASSWORD": {
+      "description": "Long, unique password for the /dev control room",
+      "required": true
+    },
+    "PLATFORM_MAX_BOTS": {
+      "description": "Shared QR and pairing-code fleet capacity",
+      "value": "30"
+    },
+    "JUNE_MAX_SESSIONS": {
+      "description": "Backward-compatible capacity fallback",
+      "value": "30"
+    },
+    "PLATFORM_CREATES_PER_HOUR": {
+      "description": "Public bot creations allowed per IP each hour",
+      "value": "4"
+    },
+    "PLATFORM_SLOT_TTL_MIN": {
+      "description": "Public pairing slot lifetime in minutes",
+      "value": "15"
     }
   }
 }
