@@ -216,6 +216,7 @@ function createBotDatabase(options = {}) {
   let authMirrorTimer = null;
   let authMirrorRunning = null;
   let lastAuthMirror = null;
+  let authMirrorConfirmed = false;
   let shuttingDown = false;
 
   // SQLite is always the live source of truth. Remote adapters mirror writes in
@@ -504,7 +505,7 @@ function createBotDatabase(options = {}) {
       return lastAuthMirror;
     }
 
-    authMirrorRunning = (async () => {
+    const operation = (async () => {
       try {
         const snapshot = buildRemoteAuthSnapshot();
         if (!snapshot) {
@@ -539,12 +540,18 @@ function createBotDatabase(options = {}) {
       } catch (error) {
         lastAuthMirror = { ok: false, reason, error: error.code || 'mirror-failed', timestamp: Date.now() };
         return lastAuthMirror;
-      } finally {
-        authMirrorRunning = null;
       }
     })();
 
-    return authMirrorRunning;
+    // Assign before awaiting, and clear only if this exact operation is still
+    // current. This avoids a synchronous-return race where an early skipped
+    // mirror permanently leaves a resolved promise in authMirrorRunning.
+    authMirrorRunning = operation;
+    try {
+      return await operation;
+    } finally {
+      if (authMirrorRunning === operation) authMirrorRunning = null;
+    }
   }
 
   function scheduleRemoteAuthMirror(reason = 'auth-update') {
@@ -555,7 +562,12 @@ function createBotDatabase(options = {}) {
     if (authMirrorTimer) return true;
     authMirrorTimer = setTimeout(() => {
       authMirrorTimer = null;
-      void mirrorRemoteAuthState(reason);
+      void mirrorRemoteAuthState(reason).then(result => {
+        if (result?.ok && !authMirrorConfirmed) {
+          authMirrorConfirmed = true;
+          console.log(`[DB] Auth mirror confirmed for bot_id=${botId} via ${(result.succeeded || []).join(', ')}`);
+        }
+      });
     }, AUTH_MIRROR_DEBOUNCE_MS);
     authMirrorTimer.unref?.();
     return true;
