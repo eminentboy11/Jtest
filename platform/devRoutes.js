@@ -19,6 +19,7 @@ const slots = require('./slots');
 const registry = require('./registry');
 const ratelimit = require('./ratelimit');
 const sessions = require('./sessions');
+const sessionService = require('./sessionService');
 
 const router = Router();
 
@@ -74,7 +75,7 @@ router.post('/dev/api/logout', requireDev, (req, res) => {
 // ── Overview ──────────────────────────────────────────────────────────────────
 router.get('/dev/api/overview', requireDev, async (_req, res) => {
     try {
-        const snapshot = sessions.manager()?.snapshot() || [];
+        const snapshot = sessionService.snapshot();
         const mem = process.memoryUsage();
         res.json({
             sessions: {
@@ -105,7 +106,7 @@ router.get('/dev/api/overview', requireDev, async (_req, res) => {
 router.get('/dev/api/sessions', requireDev, async (_req, res) => {
     try {
         const tracked = new Map((await registry.listActive()).map((r) => [r.botId, r]));
-        const list = (sessions.manager()?.list() || []).map((bot) => {
+        const list = sessionService.list().map((bot) => {
             const rec = tracked.get(bot.id);
             return {
                 ...bot.status,
@@ -124,20 +125,13 @@ router.get('/dev/api/sessions', requireDev, async (_req, res) => {
 
 router.post('/dev/api/sessions/:id/reconnect', requireDev, async (req, res) => {
     const id = String(req.params.id);
-    const bot = sessions.manager()?.get(id);
+    const bot = sessionService.get(id);
     if (!bot) return res.status(404).json({ error: 'Unknown session.' });
     try {
         console.log(`[ DEV ] Reconnect requested for session "${id}"`);
-        if (bot.botState === 'needs-login' && typeof global.__JUNE_REPAIR_SESSION === 'function') {
-            const result = await global.__JUNE_REPAIR_SESSION(id, {});
-            return res.json({ ok: Boolean(result?.ok), result });
-        }
-        if (bot.sock) {
-            try { bot.sock.end(new Error('dev reconnect')); } catch (_) { bot.sock?.ws?.close?.(); }
-            return res.json({ ok: true, message: 'Socket dropped — engine auto-reconnect takes over.' });
-        }
-        await sessions.manager().start(id);
-        res.json({ ok: true, message: 'Session started.' });
+        const result = await sessionService.reconnect(id, { repair: bot.botState === 'needs-login' });
+        if (!result?.ok) return res.status(400).json({ error: result?.error || result?.reason || 'Reconnect failed.' });
+        res.json({ ok: true, message: result.connected === false ? 'Reconnect started; session is still connecting.' : 'Session reconnected.', result });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -145,11 +139,11 @@ router.post('/dev/api/sessions/:id/reconnect', requireDev, async (req, res) => {
 
 router.post('/dev/api/sessions/:id/stop', requireDev, async (req, res) => {
     const id = String(req.params.id);
-    if (!sessions.manager()?.get(id)) return res.status(404).json({ error: 'Unknown session.' });
     try {
         console.log(`[ DEV ] Stop requested for session "${id}"`);
-        await sessions.manager().stop(id);
-        res.json({ ok: true, message: 'Session stopped (auth kept — reconnect revives it).' });
+        const result = await sessionService.stop(id);
+        if (!result?.ok) return res.status(404).json({ error: 'Unknown session.' });
+        res.json({ ok: true, message: 'Session stopped (authentication preserved).', result });
     } catch (err) {
         res.status(500).json({ error: err.message });
     }
@@ -159,7 +153,7 @@ router.delete('/dev/api/sessions/:id', requireDev, async (req, res) => {
     const id = String(req.params.id);
     try {
         console.log(`[ DEV ] DELETE requested for session "${id}"`);
-        const result = await global.__JUNE_REMOVE_SESSION(id);
+        const result = await sessionService.remove(id, { reason: 'developer-delete' });
         if (!result?.ok) return res.status(400).json({ error: `Remove failed: ${result?.reason || 'unknown'}` });
         await registry.markRemoved(id);
         res.json({ ok: true, result });

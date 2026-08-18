@@ -125,7 +125,6 @@ const baseConfig = {
       success: '✅ Success!',
       error: '❌ Error occurred!',
       ownerOnly: '👑 This command is only for bot owner!',
-      superOwnerOnly: '👑 Super Owner only!\n\nYou don\u2019t have permission to add or manage\nbot sessions on this deployment.',
       adminOnly: '🛡️ This command is only for group admins!',
       groupOnly: '👥 This command can only be used in groups!',
       privateOnly: '💬 This command can only be used in private chat!',

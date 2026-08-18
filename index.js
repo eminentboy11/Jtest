@@ -149,13 +149,12 @@ const { runInBot, DEFAULT_BOT_ID, getCurrentBotId } = require('./utils/core/botC
 // in platform mode so the legacy "no TTY -> exit(1)" first-run path is never
 // hit, and its zero-dependency design cannot create require cycles.
 const platformBridge = require('./platform/bridge')
+const platformSessionService = require('./platform/sessionService')
 const {
     claimSuperOwner,
     superOwnerStatusFor,
-    isPlatformOwner,
-    isPlatformOwnerForSession,
 } = require('./utils/core/ownership')
-const addbotFlow = require('./utils/core/addbotFlow')
+const sessionRegistry = require('./utils/core/sessionRegistry')
 const {
     SessionManager,
     requestPairingCodeForCycle,
@@ -489,7 +488,7 @@ if (!fs.existsSync(envPath)) {
         '#',
         '# No registry at all -> single default session with the first-run',
         '# login flow (interactive menu, or exit message when headless).',
-        'JUNE_SESSIONS=',
+        platformBridge.platformEnabled ? 'JUNE_SESSIONS=[]' : 'JUNE_SESSIONS=',
         '',
         '# ── EXTERNAL DATABASES (optional; per-bot rows are separated',
         '#    by bot_id automatically) ───────────────────────────────',
@@ -525,8 +524,7 @@ sessionManagerRef = sessionManager
 // this value only sets the shared limit. Configurable: JUNE_PAIRING_MAX_ATTEMPTS.
 const PAIRING_MAX_ATTEMPTS = parsePairingMaxAttempts(process.env.JUNE_PAIRING_MAX_ATTEMPTS)
 // Socket-stabilize wait before requesting a pairing code (legacy flows only;
-// live .addbot/.repairbot flows are capped by addbotFlow.flowStabilizeMs).
-const PAIRING_STABILIZE_MS = addbotFlow.parseStabilizeMs(process.env.JUNE_PAIRING_STABILIZE_MS)
+const PAIRING_STABILIZE_MS = sessionRegistry.parseStabilizeMs(process.env.JUNE_PAIRING_STABILIZE_MS)
 
 // ─── JUNE_SESSIONS hot-reload (sole registry, .env file) ─────────────────────
 // The .env file's JUNE_SESSIONS line is the single source of truth. Whenever
@@ -577,12 +575,14 @@ function syncJuneSessionsFromEnvFile() {
     }
 
     _lastEnvJuneSessions = value
-    if (value.trim() === '') delete process.env.JUNE_SESSIONS
-    else process.env.JUNE_SESSIONS = value
+    if (value.trim() === '') {
+        if (platformBridge.platformEnabled) process.env.JUNE_SESSIONS = '[]'
+        else delete process.env.JUNE_SESSIONS
+    } else {
+        process.env.JUNE_SESSIONS = value
+    }
     return true
 }
-
-global.__JUNE_SYNC_SESSIONS = syncJuneSessionsFromEnvFile
 
 /**
  * Rewrite the .env file's JUNE_SESSIONS line in place (single source of
@@ -607,176 +607,40 @@ function writeJuneSessionsLineToEnv(newValue) {
 }
 
 /**
- * .addbot runtime hook: validate + append a session to the JUNE_SESSIONS
- * registry (process.env and, when possible, the .env line), then reuse the
- * existing reconciliation pipeline for the hot-add. No second hot-add
- * implementation — existing sessions are never touched.
+ * Internal web provisioning: validate and append a session to JUNE_SESSIONS,
+ * then reuse the engine's existing reconciliation pipeline. Existing sessions
+ * are never restarted or otherwise touched.
  */
-// ─── Live addbot flow (in-chat code delivery, reactions) ────────────────────
-// Delivery state only — this map is NOT authoritative pairing state.
-// Pairing activity/generation lives on BotInstance. A terminal notification may
-// remain queued here after pairing has already ended without reactivating it.
-// newBotId -> { chatJid, viaBotId, quotedMsg, phone, lastCode, lastAttempt,
-//               statusText }: where to deliver codes/status notifications.
-const _pendingAddRequests = new Map()
-
-const FLOW_SEND_ATTEMPTS = 3
-const FLOW_SEND_RETRY_DELAY_MS = 1500
-
-// Delivery order (all paths now use the FIXED full-message quote):
-//   1) gifted-btns with the panel-proven quick-reply style ({ id, text } —
-//      the same shape botinfo.js sends and which renders on real panels)
-//   2) plain text (guaranteed to render)
-// Button delivery failures always fall through to text — the code can
-// never be lost again.
-async function sendFlowMessage(viaBotId, chatJid, content, quotedMsg) {
-    const candidates = [
-        sessionManager.get(viaBotId),
-        ...sessionManager.list().filter((b) => String(b.id) !== String(viaBotId)),
-    ].filter(Boolean)
-
-    const text = content?.text || String(content || '')
-    // Baileys' quote path reads quoted.message — only quote when the full
-    // message payload is present (pure helper, regression-tested).
-    const quoteOpt = addbotFlow.buildFlowQuoteOptions(quotedMsg)
-
-    for (let attempt = 0; attempt < FLOW_SEND_ATTEMPTS; attempt++) {
-        for (const bot of candidates) {
-            if (!bot.sock || bot.botState !== 'connected') continue
-
-            // 1) Buttons — the panel-proven quick-reply path.
-            if (content?.withButtons) {
-                try {
-                    const { sendButtons } = require('gifted-btns')
-                    await sendButtons(bot.sock, chatJid, addbotFlow.buildSimpleButtons(content), quoteOpt)
-                    return true
-                } catch (e) {
-                }
-            }
-
-            // 2) Plain text — always renders.
-            try {
-                await bot.sock.sendMessage(chatJid, { text }, quoteOpt)
-                return true
-            } catch (e) {
-            }
-            try {
-                await bot.sock.sendMessage(chatJid, { text })
-                return true
-            } catch (e) {
-            }
-        }
-        if (attempt < FLOW_SEND_ATTEMPTS - 1) {
-            await new Promise((r) => setTimeout(r, FLOW_SEND_RETRY_DELAY_MS))
-        }
-    }
-    return false
-}
-
-async function reactFlowMessage(viaBotId, chatJid, emoji, key) {
-    if (!key) return false
-    const candidates = [
-        sessionManager.get(viaBotId),
-        ...sessionManager.list().filter((b) => String(b.id) !== String(viaBotId)),
-    ].filter(Boolean)
-    for (const bot of candidates) {
-        if (!bot.sock || bot.botState !== 'connected') continue
-        try {
-            await bot.sock.sendMessage(chatJid, { react: { text: emoji, key } })
-            return true
-        } catch (_) { /* try the next session */ }
-    }
-    return false
-}
-
-async function deliverPairingCodeToRequester(bot, socket, reservation, code) {
-    // Delivery routing may outlive pairing for terminal-message retries, so the
-    // active cycle/socket token — not map presence — authorizes code delivery.
-    if (!bot.isPairingRequestCurrent(reservation, socket)) return false
-    const pending = _pendingAddRequests.get(bot.id)
-    if (!pending || pending.statusText) return false
-
-    pending.lastCode = code
-    pending.lastAttempt = reservation.attempt
-    pending.codeGeneration = reservation.generation
-    const payload = addbotFlow.buildCodeMessage({
-        code,
-        attempt: reservation.attempt,
-        max: PAIRING_MAX_ATTEMPTS,
-        phone: bot.phone || pending.phone,
-        botId: bot.id,
-    })
-
-    // Revalidate immediately before entering the asynchronous send path.
-    if (!bot.isPairingRequestCurrent(reservation, socket)) return false
-    return sendFlowMessage(pending.viaBotId, pending.chatJid, payload, pending.quotedMsg)
-}
-
-async function deliverAddbotFlowStatus(bot, state, detail) {
-    const pending = _pendingAddRequests.get(bot.id)
-    if (!pending) return
-    let text = addbotFlow.buildStatusMessage(state, pending.phone)
-    if (detail) text += `\n\n_${String(detail).slice(0, 120)}_`
-    pending.statusText = text
-    const ok = await sendFlowMessage(pending.viaBotId, pending.chatJid, { text }, pending.quotedMsg)
-    await reactFlowMessage(pending.viaBotId, pending.chatJid,
-        state === 'connected' ? '✅' : '⚠️', pending.quotedMsg?.key || null)
-    if (ok) {
-        _pendingAddRequests.delete(bot.id)
-        dropPendingChat(bot.id)
-    } else {
-    }
-}
-
-// When the delivering session reconnects, re-attempt any outstanding flow
-// messages (the latest code, or a pending terminal status).
-async function retryPendingFlowDeliveries(viaBotId) {
-    for (const [newBotId, pending] of [..._pendingAddRequests.entries()]) {
-        if (String(pending.viaBotId) !== String(viaBotId)) continue
-        if (pending.statusText) {
-            const ok = await sendFlowMessage(viaBotId, pending.chatJid, { text: pending.statusText }, pending.quotedMsg)
-            if (ok) {
-                _pendingAddRequests.delete(newBotId)
-                dropPendingChat(newBotId)
-            }
-        } else if (pending.lastCode) {
-            const targetBot = sessionManager.get(newBotId)
-            // Never replay a code after success, removal, repair, restart, or
-            // any other generation change. Notification retries are separate
-            // from pairing authority.
-            if (!targetBot?.hasActivePairingCycle(pending.codeGeneration)) continue
-            const payload = addbotFlow.buildCodeMessage({
-                code: pending.lastCode,
-                attempt: pending.lastAttempt || 1,
-                max: PAIRING_MAX_ATTEMPTS,
-                phone: pending.phone,
-                botId: newBotId,
-            })
-            await sendFlowMessage(viaBotId, pending.chatJid, payload, pending.quotedMsg)
-        }
-    }
-}
-
-async function addSessionViaRegistry(entry = {}, meta = {}) {
+// ─── Internal web/session provisioning ───────────────────────────────────────
+async function addSessionViaRegistry(entry = {}, _options = {}) {
     const registry = parseSessionsJson(process.env.JUNE_SESSIONS) || []
-    const base = addSessionEntry(registry, entry)
-    if (!base.ok) return base
+    const qrLogin = entry?.qrLogin === true
+    let base
 
-    // The runtime registry may be ahead of (or behind) the env registry —
-    // check the running sessions for storage/credential conflicts too.
-    const phone = base.entry.phone
-    const sessionId = base.entry.sessionId
+    if (qrLogin) {
+        const id = String(entry.id || '').trim()
+        if (!id) return { ok: false, reason: 'invalid-id' }
+        if (normalizeSessionEntries(registry).some(existing => String(existing.id) === id)) {
+            return { ok: false, reason: 'duplicate-id' }
+        }
+        const qrEntry = { id, name: String(entry.name || `June X ${id.slice(-3)}`), qrLogin: true }
+        base = { ok: true, entry: qrEntry, registry: [...registry, qrEntry] }
+    } else {
+        base = addSessionEntry(registry, entry)
+        if (!base.ok) return base
+    }
+
+    const phone = String(base.entry.phone || '')
+    const sessionId = String(base.entry.sessionId || '')
     // The same phone may own up to four independent linked-device sessions.
-    // Only credential reuse is a conflict; phone quota is checked below.
+    // Only credential reuse is a conflict; QR and code modes share this exact
+    // registry/quota/reconciliation pipeline.
     const runningConflict = Boolean(sessionId) && sessionManager.list().some((bot) =>
         bot.sessionId === sessionId
     )
     if (runningConflict) return { ok: false, reason: 'duplicate-sessionId' }
 
-    // Quotas: global session cap (JUNE_MAX_SESSIONS) and WhatsApp's per-number
-    // device cap. Initial-registry sessions are never quota-checked — this is
-    // a runtime .addbot guard only.
-    const quota = addbotFlow.checkAddQuota({
+    const quota = sessionRegistry.checkAddQuota({
         registry,
         runningPhones: sessionManager.list().map((bot) => bot.phone),
         phone,
@@ -788,39 +652,33 @@ async function addSessionViaRegistry(entry = {}, meta = {}) {
     process.env.JUNE_SESSIONS = value
     const persisted = writeJuneSessionsLineToEnv(value)
 
-    // Register the live flow FIRST (so the pairing code can be delivered the
-    // moment it is generated), then reconcile immediately — no debounce
-    // wait, the hot-add starts right away. reconcileSessions is guarded by
-    // _reconcileRunning, so the watcher/poll can never double-run it.
-    // Normalize the COMPLETE registry so duplicate-phone ordinals are stable:
-    // phone, phone-2, phone-3, phone-4.
     const normalizedRegistry = normalizeSessionEntries(base.registry)
     const derivedId = normalizedRegistry[normalizedRegistry.length - 1]?.id || phone
-    if (meta && meta.chatJid && meta.viaBotId) {
-        _pendingAddRequests.set(derivedId, {
-            chatJid: meta.chatJid,
-            viaBotId: meta.viaBotId,
-            quotedMsg: meta.quotedMsg || null,
-            phone,
-        })
-        rememberPendingChat(derivedId, meta.chatJid)
+
+    try {
+        await reconcileSessions()
+        // A concurrent reconcile can cause the guarded call above to return
+        // early. Schedule one guaranteed follow-up and wait briefly for this
+        // exact botId to be registered, without touching any other session.
+        if (!sessionManager.get(derivedId)) scheduleSessionReconcile()
+        const deadline = Date.now() + 5000
+        while (!sessionManager.get(derivedId) && Date.now() < deadline) await delay(50)
+        if (!sessionManager.get(derivedId)) {
+            return { ok: false, reason: 'reconcile-failed', id: derivedId, phone, sessionId, persisted }
+        }
+    } catch (error) {
+        return { ok: false, reason: 'reconcile-failed', id: derivedId, phone, sessionId, persisted, error: error.message }
     }
 
-    void reconcileSessions().catch((err) => {
-        log(`[ MULTI-SESSION ] Immediate reconcile failed: ${err?.message || err}`, 'red', true)
-        scheduleSessionReconcile()
-    })
-
-    return { ok: true, id: derivedId, phone, sessionId, persisted }
+    return { ok: true, id: derivedId, phone, sessionId, qrLogin, persisted }
 }
 
 /**
- * .delbot runtime hook: remove an entry (by phone or id) from the
- * JUNE_SESSIONS registry and reuse the existing reconciliation pipeline for
- * the hot-remove. No second hot-remove implementation.
+ * Internal permanent deletion: remove an entry by exact botId/phone and clear
+ * its scoped runtime, authentication, database and registry artifacts.
  */
 function registryIdentity(registry, identifier) {
-    const index = addbotFlow.findRegistryEntryIndex(registry, identifier)
+    const index = sessionRegistry.findRegistryEntryIndex(registry, identifier)
     if (index < 0) return null
     const normalized = normalizeSessionEntries(registry)
     return { index, raw: registry[index], normalized: normalized[index] }
@@ -904,32 +762,7 @@ async function permanentlyForgetSession(identity) {
     pgAdapter.unregister(botId)
     mongoAdapter.unregister(botId)
     removeSessionArtifacts(paths.sessionDir)
-
-    _pendingAddRequests.delete(botId)
-    dropPendingChat(botId)
     return { id: botId, ...paths }
-}
-
-async function setSessionPausedViaRegistry(identifier = '', paused = true) {
-    const registry = parseSessionsJson(process.env.JUNE_SESSIONS) || []
-    const identity = registryIdentity(registry, identifier)
-    if (!identity) return { ok: false, reason: 'unknown' }
-    if (paused && superOwnerStatusFor(identity.normalized?.phone) === '✅') {
-        return { ok: false, reason: 'control-session', id: String(identity.normalized.id) }
-    }
-
-    const result = addbotFlow.setRegistryPaused(registry, identifier, paused)
-    if (!result.ok) return result
-
-    const botId = String(identity.normalized.id)
-    if (paused) sessionManager.get(botId)?.terminatePairingCycle('pausebot')
-
-    const value = JSON.stringify(result.registry)
-    process.env.JUNE_SESSIONS = value
-    const persisted = writeJuneSessionsLineToEnv(value)
-    await reconcileSessions()
-    scheduleSessionReconcile()
-    return { ok: true, id: botId, entry: result.entry, paused, persisted }
 }
 
 async function removeSessionViaRegistry(identifier = '') {
@@ -937,18 +770,9 @@ async function removeSessionViaRegistry(identifier = '') {
     const identity = registryIdentity(registry, identifier)
     if (!identity) return { ok: false, reason: 'unknown' }
 
-    const res = addbotFlow.removeRegistryEntry(registry, identifier)
+    const res = sessionRegistry.removeRegistryEntry(registry, identifier)
     if (!res.ok) return res
-    const removedPhone = addbotFlow.digitsOnly(identity.raw?.phone)
     const botId = String(identity.normalized.id)
-
-    // If this removal kills an in-flight addbot flow, close its chat flow first.
-    for (const [pendingBotId, pending] of _pendingAddRequests) {
-        if (String(pendingBotId) === botId ||
-            (removedPhone && addbotFlow.digitsOnly(pending.phone) === removedPhone)) {
-            await deliverAddbotFlowStatus({ id: pendingBotId }, 'cancelled')
-        }
-    }
 
     const cleanup = await permanentlyForgetSession(identity)
     const value = JSON.stringify(res.registry)
@@ -956,107 +780,6 @@ async function removeSessionViaRegistry(identifier = '') {
     const persisted = writeJuneSessionsLineToEnv(value)
     scheduleSessionReconcile()
     return { ok: true, removed: res.removed, id: botId, cleanup, persisted, permanent: true }
-}
-
-/**
- * .repairbot runtime hook: re-arm a parked session through the existing
- * per-session restart (fresh pairing cycle with the configured phone).
- */
-async function repairSessionByIdentifier(identifier = '', meta = {}) {
-    const raw = String(identifier || '').trim()
-    const digits = addbotFlow.digitsOnly(identifier)
-    const bot = sessionManager.list().find((b) =>
-        b.id === raw || (digits && addbotFlow.digitsOnly(b.phone) === digits)
-    )
-    if (!bot) return { ok: false, reason: 'unknown' }
-    if (bot.botState === 'connected') return { ok: false, reason: 'online', id: bot.id }
-    // A repaired session's fresh pairing code + status flow back into the
-    // chat that requested the repair (same live-flow bridge as .addbot).
-    if (meta && meta.chatJid && meta.viaBotId) {
-        // A repair is a new operation: replace any stale terminal-notification
-        // delivery record without relying on it as pairing state.
-        _pendingAddRequests.set(bot.id, {
-            chatJid: meta.chatJid,
-            viaBotId: meta.viaBotId,
-            quotedMsg: meta.quotedMsg || null,
-            phone: bot.phone,
-        })
-        rememberPendingChat(bot.id, meta.chatJid)
-    }
-    const result = await restartBot(bot.id, { pairingReason: 'repairbot' })
-    return { ok: Boolean(result?.ok), id: bot.id, error: result?.error }
-}
-
-// ── Live-flow buttons (copy code / cancel) ────────────────────────────────────
-// Chat-indexed flow lookup: WhatsApp may deliver a button reply with an
-// EMPTY selectedId (label only), so the cancel handler can resolve the flow
-// purely from the chat the tap arrived in.
-const _pendingByChat = new Map() // normalized chatJid -> newBotId
-
-function normalizeFlowChat(jid) {
-    try { return normalizeJidWithLid(String(jid || '')) } catch (_) { return String(jid || '') }
-}
-
-function rememberPendingChat(newBotId, chatJid) {
-    const key = normalizeFlowChat(chatJid)
-    if (key) _pendingByChat.set(key, String(newBotId))
-}
-
-function dropPendingChat(newBotId) {
-    for (const [chatKey, botId] of [..._pendingByChat.entries()]) {
-        if (String(botId) === String(newBotId)) _pendingByChat.delete(chatKey)
-    }
-}
-
-async function handleAddbotButton(buttonId, chatJid, sender, msg) {
-    try {
-        const rawId = String(buttonId || '')
-        const displayText = String(
-            msg?.message?.templateButtonReplyMessage?.selectedDisplayText || rawId || ''
-        )
-        const resolved = addbotFlow.resolveFlowTap({
-            buttonId: rawId,
-            displayText,
-            chatBotId: _pendingByChat.get(normalizeFlowChat(chatJid)) || undefined,
-        })
-        if (!resolved) {
-            return
-        }
-        const { action, botId: newBotId } = resolved
-        if (action === 'copy') {
-            return
-        }
-
-        // cancel path
-        const pending = newBotId ? _pendingAddRequests.get(newBotId) : null
-        if (!pending) {
-            return
-        }
-        // Chat tolerance: accept the tap from the recorded chat OR any chat
-        // (PN/LID variants of the same conversation differ) — the sender is
-        // still verified below, so this never widens the security boundary.
-        const senderNumber = String(sender || '').split(':')[0].split('@')[0]
-        const ownerSession = sessionManager.get(pending.viaBotId)
-        if (!isPlatformOwnerForSession(senderNumber, ownerSession?.phone)) {
-           if (isPlatformOwner(senderNumber)) return
-            await sendFlowMessage(pending.viaBotId, chatJid,
-                { text: config.messages.superOwnerOnly || '👑 Super Owner only!' },
-                pending.quotedMsg)
-            return
-        }
-        
-        const removed = await removeSessionViaRegistry(pending.phone)
-        if (!removed.ok && removed.reason === 'unknown') {
-            // The session may already be gone from the registry — treat the
-            // flow as cancelled anyway.
-        }
-        if (_pendingAddRequests.has(newBotId)) {
-            await deliverAddbotFlowStatus({ id: newBotId }, 'cancelled')
-        }
-        dropPendingChat(newBotId)
-    } catch (e) {
-        log(`Button tap handler error: ${e?.message || e}`, 'red', true)
-    }
 }
 
 function fleetSnapshot() {
@@ -1088,15 +811,25 @@ function fleetSnapshot() {
     return snapshot
 }
 
-global.__JUNE_ADD_SESSION = addSessionViaRegistry
-// Platform: the dev control room reads/actions sessions through the live manager.
-global.__JUNE_SESSION_MANAGER = sessionManager
-global.__JUNE_REMOVE_SESSION = removeSessionViaRegistry
-global.__JUNE_PAUSE_SESSION = (identifier) => setSessionPausedViaRegistry(identifier, true)
-global.__JUNE_RESUME_SESSION = (identifier) => setSessionPausedViaRegistry(identifier, false)
-global.__JUNE_REPAIR_SESSION = repairSessionByIdentifier
-global.__JUNE_ADD_BOT_BUTTON = handleAddbotButton
-global.__JUNE_SESSIONS_SNAPSHOT = fleetSnapshot
+// Configure the web platform's internal control plane once. Public routes,
+// /dev and GC consume platform/sessionService rather than legacy chat globals.
+platformSessionService.configure({
+    provision: (entry, options) => addSessionViaRegistry(entry, options),
+    remove: (id) => removeSessionViaRegistry(id),
+    stop: async (id) => {
+        const bot = sessionManager.get(id)
+        if (!bot) return { ok: false, reason: 'unknown', id: String(id) }
+        await sessionManager.stop(id)
+        return { ok: true, id: String(id), state: 'disconnected' }
+    },
+    reconnect: (id, options = {}) => restartBot(id, {
+        pairingReason: options.repair ? 'web-repair' : 'web-reconnect',
+    }),
+    reconcile: () => reconcileSessions(),
+    get: (id) => sessionManager.get(id),
+    list: () => sessionManager.list(),
+    snapshot: () => fleetSnapshot(),
+})
 
 // ─── Cleanup Functions ────────────────────────────────────────────────────────
 
@@ -1512,11 +1245,8 @@ async function getLoginMethod(bot) {
 
 async function requestPairingCode(socket, bot) {
     try {
-        // `_pendingAddRequests` affects only delivery latency/UX. It is not used
-        // to decide whether pairing is active; BotInstance generation does that.
-        const hasChatDelivery = _pendingAddRequests.has(bot.id)
-        const stabilizeMs = addbotFlow.flowStabilizeMs(PAIRING_STABILIZE_MS, hasChatDelivery)
-        log(`Waiting ${stabilizeMs}ms for socket to stabilize... (${bot.id}${hasChatDelivery ? ' — live flow' : ''})`, 'yellow')
+        const stabilizeMs = PAIRING_STABILIZE_MS
+        log(`Waiting ${stabilizeMs}ms for socket to stabilize... (${bot.id})`, 'yellow')
 
         const result = await requestPairingCodeForCycle({
             bot,
@@ -1530,20 +1260,14 @@ async function requestPairingCode(socket, bot) {
             requestCode: (phone) => socket.requestPairingCode(phone, 'JUNEXBOT'),
             onCode: async (rawCode, reservation) => {
                 const code = rawCode?.match(/.{1,4}/g)?.join('-') || rawCode
-                // The lifecycle helper validates before this callback; validate
-                // again inside delivery before any in-chat code is sent.
                 bot._lastPairingCode = code
-                // Platform: deliver the code to the visitor's pairing slot too.
                 platformBridge.emitPairingCode(bot, code, reservation)
                 log(chalk.black.bgCyanBright(`\n🔑 [${bot.id}] Your Pairing Code (${reservation.attempt}/${reservation.limit}): ${code}\n`), 'white')
-                log(`\n1. Open WhatsApp → Settings → Linked Devices\n2. Tap "Link a Device"\n3. Enter the code above\n`, 'blue')
-                await deliverPairingCodeToRequester(bot, socket, reservation, code)
             },
             onExhausted: async () => {
                 platformBridge.emitPairingExhausted(bot)
                 log(chalk.white.bgRedBright(`[ PAIRING:${bot.id} ] Limit reached — ${PAIRING_MAX_ATTEMPTS} codes were issued without a successful pairing.`), 'white')
-                log(`[ PAIRING:${bot.id} ] Parking as needs-login. Send .restart to this session (or restart the process) to begin a fresh pairing cycle.`, 'yellow')
-                await deliverAddbotFlowStatus(bot, 'pairing-limit')
+                log(`[ PAIRING:${bot.id} ] Parking as needs-login. Use the developer dashboard to reconnect or delete it.`, 'yellow')
             },
         })
 
@@ -1737,9 +1461,7 @@ async function reconcileSessions() {
             if (currentSet.has(id)) continue
             const entry = entries.find((e) => String(e.id) === id) || {}
             const bot = sessionManager.register(entry)
-            if (bot.phone) {
-                bot.startPairingCycle(_pendingAddRequests.has(id) ? 'addbot' : 'hot-added-session')
-            }
+            if (bot.phone) bot.startPairingCycle('web-code-provision')
             try {
                 await wireBotRuntime(bot)
                 // Runtime hot-add is not an initial startup — the startup
@@ -1750,17 +1472,11 @@ async function reconcileSessions() {
                     log(`[ SESSION:${id} ] Hot-add boot failed: ${err?.message || err}`, 'red', true)
                     bot.lastError = String(err?.message || err)
                     bot.botState = 'needs-login'
-                    if (_pendingAddRequests.has(bot.id)) {
-                        void deliverAddbotFlowStatus(bot, 'failed', err?.message)
-                    }
                 })
             } catch (error) {
                 log(`[ SESSION:${id} ] Hot-add wiring failed: ${error?.message || error}`, 'red', true)
                 bot.lastError = String(error?.message || error)
                 bot.botState = 'needs-login'
-                if (_pendingAddRequests.has(bot.id)) {
-                    void deliverAddbotFlowStatus(bot, 'failed', error?.message)
-                }
             }
         }
 
@@ -1786,8 +1502,6 @@ async function reconcileSessions() {
         _reconcileRunning = false
     }
 }
-
-global.__JUNE_RECONCILE_SESSIONS = reconcileSessions
 
 // ─── In-memory Message Store (per bot) ────────────────────────────────────────
 
@@ -2119,15 +1833,9 @@ async function startBotSocket(bot) {
                 bot.connectedAt = null
                 clearSessionFiles(bot)
                 log(`Session cleared (${bot.id}). Returning to login flow in 10 seconds...`, 'yellow')
-                if (bot.hasActivePairingCycle() && _pendingAddRequests.has(bot.id)) {
-                    // An active live pairing cycle is waiting for its next code;
-                    // terminal-notification retries alone do not qualify.
-                    await delay(1500)
-                } else {
-                    for (let i = 10; i > 0; i--) {
-                        log(`Restarting login in ${i}s... (${bot.id})`, 'cyan')
-                        await delay(1000)
-                    }
+                for (let i = 10; i > 0; i--) {
+                    log(`Restarting login in ${i}s... (${bot.id})`, 'cyan')
+                    await delay(1000)
                 }
                 log(`Restarting login flow... (${bot.id})`, 'green')
                 if (bot.phone) {
@@ -2304,14 +2012,6 @@ async function startBotSocket(bot) {
                     log('[ SUPER OWNER ] Deployment Super Owner established by the first initialized session.', 'green')
                 }
             }
-            // Live addbot flow: the session is online — report it in-chat.
-            if (_pendingAddRequests.has(bot.id)) {
-                await deliverAddbotFlowStatus(bot, 'connected')
-            }
-            // This session may be the DELIVERY channel for another pending
-            // flow — re-attempt any outstanding code/status messages now
-            // that its socket is live again.
-            await retryPendingFlowDeliveries(bot.id).catch(() => {})
             await tryMigrateFileAuth('connection-open')
             // Auto-export the session to .env / registry so restarts never need re-login
             autoExportSessionToRegistry(bot, true).catch(() => {})
@@ -3410,10 +3110,7 @@ function startKeepAliveServer() {
 let keepAliveServer = null
 
 // ─── Per-session restart ──────────────────────────────────────────────────────
-// Restarts ONLY the session that asked for it: the other sessions keep
-// running untouched. The command layer reaches this through
-// global.__JUNE_RESTART_SESSION(botId), falling back to process.exit(1) only
-// when the hook is unavailable (legacy single-session deployments).
+// Restarts exactly one session for the internal web developer control plane.
 
 async function restartBot(id, { pairingReason = 'explicit-restart' } = {}) {
     const bot = sessionManager.get(id)
@@ -3446,9 +3143,9 @@ async function restartBot(id, { pairingReason = 'explicit-restart' } = {}) {
             }
 
             const sock = await startBotSocket(bot)
-            // Wait (bounded) for the fresh socket to finish connecting so
-            // callers can reply through a live connection.
-            if (!sock.user) {
+            // Restored credentials can populate sock.user before the new socket
+            // is actually online. Wait for the real per-bot state instead.
+            if (bot.botState !== 'connected') {
                 await new Promise((resolve) => {
                     const onOpen = (update) => {
                         if (update.connection === 'open') {
@@ -3463,8 +3160,9 @@ async function restartBot(id, { pairingReason = 'explicit-restart' } = {}) {
                     }, 30000).unref?.()
                 })
             }
-            log(`[ SESSION:${bot.id} ] Restart complete.`, 'green')
-            return { ok: true, id: bot.id, sock }
+            const connected = bot.botState === 'connected'
+            log(`[ SESSION:${bot.id} ] Restart ${connected ? 'complete' : 'still connecting'}.`, connected ? 'green' : 'yellow')
+            return { ok: true, id: bot.id, sock, connected }
         } catch (error) {
             log(`[ SESSION:${bot.id} ] Restart failed: ${error?.message || error}`, 'red', true)
             bot.lastError = String(error?.message || error)
@@ -3473,8 +3171,6 @@ async function restartBot(id, { pairingReason = 'explicit-restart' } = {}) {
         }
     })
 }
-
-global.__JUNE_RESTART_SESSION = restartBot
 
 global.__JUNE_SHUTDOWN = async () => {
     if (global._shutdownPromise) return global._shutdownPromise

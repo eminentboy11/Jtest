@@ -400,8 +400,8 @@ const last3Digits = (value) => {
     return digits ? digits.slice(-3).padStart(3, '0') : '';
 };
 
-// Supported session-ID formats (shared by index.js bootstrap logic and the
-// .addbot command so validation stays in one place).
+// Supported session-ID formats shared by web provisioning and engine bootstrap
+// so validation stays in one place.
 const VALID_PREFIXES = ['JUNE-MD:~', 'Ultra-X:~', 'June-Ultra:~', 'June::~'];
 
 const isValidSessionIdFormat = (value) => {
@@ -410,7 +410,7 @@ const isValidSessionIdFormat = (value) => {
 };
 
 /**
- * Validate a raw .addbot-style session entry (phone + optional sessionId).
+ * Validate a web/internal session entry (phone + optional sessionId).
  * Returns { ok: false, reason } or { ok: true, phone, sessionId }.
  */
 function validateSessionEntry(entry = {}) {
