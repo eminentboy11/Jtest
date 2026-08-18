@@ -68,6 +68,36 @@ test('MongoDB-backed auth snapshot restores into a fresh per-session SQLite data
   }
 });
 
+test('an initial unverified skip does not poison later valid auth mirrors', { skip: !dependenciesAvailable }, async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'june-auth-skip-recovery-'));
+  const database = require('../database');
+  let mirrors = 0;
+  const db = database.createBotDatabase({
+    botId: 'skip-then-valid-test',
+    dbFile: path.join(dir, 'session.db'),
+    pg: fakeAdapter({ source: 'postgres', snapshot: null, configured: false }),
+    mongo: fakeAdapter({
+      source: 'mongo',
+      snapshot: validSnapshot(),
+      mirrorAuthState: async () => { mirrors += 1; return { acknowledged: true }; },
+    }),
+  });
+
+  try {
+    await db.ready;
+    const skipped = await db.mirrorRemoteAuthState('auth-fresh-init');
+    assert.equal(skipped.skipped, 'local-auth-not-verified');
+    assert.equal((await db.restoreRemoteAuthState()).restored, true);
+    const persisted = await db.mirrorRemoteAuthState('auth-keys');
+    assert.equal(persisted.ok, true);
+    assert.deepEqual(persisted.succeeded, ['mongo']);
+    assert.equal(mirrors, 1);
+  } finally {
+    await db.shutdownDatabase();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('auth mirror and shutdown wait for the real MongoDB write acknowledgement', { skip: !dependenciesAvailable }, async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'june-auth-flush-'));
   const database = require('../database');
