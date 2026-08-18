@@ -87,7 +87,13 @@
     </div>
 
     <div class="card">
-      <h2><span>Sessions</span><span id="sessionCount" style="letter-spacing:0"></span></h2>
+      <h2>
+        <span>Sessions</span>
+        <span style="display:flex;align-items:center;gap:.55rem;letter-spacing:0">
+          <span id="sessionCount"></span>
+          <button class="btn danger sm" id="deleteAllBotsBtn" type="button">Delete all bots</button>
+        </span>
+      </h2>
       <div style="overflow-x:auto">
       <table><thead><tr><th>ID</th><th>State</th><th>Account</th><th>Source</th><th>Pairing</th><th>Actions</th></tr></thead>
       <tbody id="sessionsBody"></tbody></table>
@@ -189,6 +195,7 @@
     fetch('/dev/api/sessions', { headers: H() }).then(function (r) { return r.json(); }).then(function (d) {
       var list = d.sessions || [];
       $('sessionCount').textContent = list.length + ' total';
+      $('deleteAllBotsBtn').disabled = list.length === 0;
       $('sessionsEmpty').classList.toggle('hidden', list.length > 0);
       $('sessionsBody').innerHTML = list.map(function (s) {
         var pairing = s.pairingActive ? (s.pairingAttempts + '/3' + (s.pairingExhausted ? ' ⛔' : '')) : '—';
@@ -225,6 +232,31 @@
     var id = button.dataset.sessionId;
     if (action === 'delete') devDel(id); else devAct(action, id);
   });
+
+  $('deleteAllBotsBtn').onclick = function () {
+    var total = $('sessionCount').textContent || 'all';
+    if (!confirm('PERMANENTLY DELETE ' + total + ' bots?\n\nAuthentication, databases and registry entries will be removed. This cannot be undone.')) return;
+    var phrase = prompt('Type DELETE ALL to confirm permanent fleet deletion:');
+    if (phrase !== 'DELETE ALL') return flash('sessMsg', false, 'Delete-all cancelled: confirmation phrase did not match.');
+
+    var button = $('deleteAllBotsBtn');
+    button.disabled = true;
+    button.textContent = 'Deleting…';
+    fetch('/dev/api/sessions', {
+      method: 'DELETE',
+      headers: H(),
+      body: JSON.stringify({ confirmation: 'DELETE ALL' })
+    })
+      .then(function (r) { return r.json().then(function (d) { return { ok:r.ok && d.ok, d:d }; }); })
+      .then(function (res) {
+        var deleted = (res.d.deleted || []).length;
+        var failed = (res.d.failed || []).length;
+        flash('sessMsg', res.ok, 'Deleted ' + deleted + ' bot(s)' + (failed ? '; ' + failed + ' failed.' : '.'));
+        refreshAll();
+      })
+      .catch(function () { flash('sessMsg', false, 'Delete-all request failed.'); })
+      .finally(function () { button.disabled = false; button.textContent = 'Delete all bots'; });
+  };
 
   function devSlotKill(slotId) {
     fetch('/dev/api/slots/' + encodeURIComponent(slotId), { method:'DELETE', headers:H() })

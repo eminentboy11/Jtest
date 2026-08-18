@@ -99,6 +99,26 @@ async function remove(botId, options = {}) {
     return requireEngine().remove(id, options);
 }
 
+/** Permanently remove every currently registered bot, one at a time. */
+async function removeAll(options = {}) {
+    const ids = list().map(bot => String(bot.id));
+    const deleted = [];
+    const failed = [];
+
+    // Sequential deletion avoids simultaneous SQLite/Mongo cleanup spikes and
+    // guarantees one failure cannot prevent later bots from being attempted.
+    for (const id of ids) {
+        try {
+            const result = await remove(id, { ...options, reason: options.reason || 'developer-delete-all' });
+            if (result?.ok) deleted.push({ id, result });
+            else failed.push({ id, reason: result?.reason || 'remove-failed' });
+        } catch (error) {
+            failed.push({ id, reason: error?.message || 'remove-failed' });
+        }
+    }
+    return { ok: failed.length === 0, total: ids.length, deleted, failed };
+}
+
 async function reconcile() { return requireEngine().reconcile(); }
 function get(botId) { return requireEngine().get(String(botId)); }
 function list() { return requireEngine().list(); }
@@ -114,6 +134,7 @@ module.exports = {
     stop,
     reconnect,
     remove,
+    removeAll,
     reconcile,
     get,
     list,

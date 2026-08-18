@@ -121,6 +121,42 @@ test('failed platform commit rolls the new engine session back permanently', asy
     assert.equal(remove[2].reason, 'provision-rollback');
 });
 
+test('delete-all permanently attempts every registered bot', async () => {
+    const fake = configureFake();
+    await service.provision({ mode: 'code', phone: '7000001' });
+    await service.provision({ mode: 'code', phone: '7000002' });
+    await service.provision({ mode: 'qr' });
+
+    const result = await service.removeAll({ reason: 'test-delete-all' });
+    assert.equal(result.ok, true);
+    assert.equal(result.total, 3);
+    assert.equal(result.deleted.length, 3);
+    assert.deepEqual(result.failed, []);
+    assert.equal(fake.bots.size, 0);
+    assert.equal(fake.calls.filter(call => call[0] === 'remove').length, 3);
+});
+
+test('delete-all continues after one bot fails', async () => {
+    service._resetForTests();
+    const fake = fakeEngine();
+    const originalRemove = fake.adapter.remove;
+    fake.adapter.remove = async (id, options) => {
+      if (id === 'bad-bot') return { ok: false, reason: 'simulated-failure' };
+      return originalRemove(id, options);
+    };
+    service.configure(fake.adapter);
+    await service.provision({ mode: 'code', phone: '7000101' });
+    // Insert a deterministic failing id directly through the fake engine.
+    fake.bots.set('bad-bot', { id: 'bad-bot', botState: 'connected', status: { id: 'bad-bot', state: 'connected' } });
+    await service.provision({ mode: 'code', phone: '7000103' });
+
+    const result = await service.removeAll();
+    assert.equal(result.ok, false);
+    assert.deepEqual(result.deleted.map(item => item.id).sort(), ['7000101', '7000103']);
+    assert.deepEqual(result.failed, [{ id: 'bad-bot', reason: 'simulated-failure' }]);
+    assert.ok(fake.bots.has('bad-bot'));
+});
+
 test('two-session operations are strictly scoped by botId', async () => {
     const fake = configureFake();
     await service.provision({ mode: 'code', phone: '1111111' });

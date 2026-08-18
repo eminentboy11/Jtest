@@ -155,6 +155,39 @@ router.get('/dev/api/sessions', requireDev, async (_req, res) => {
     }
 });
 
+// Permanent fleet wipe. The explicit phrase prevents accidental API/UI clicks.
+router.delete('/dev/api/sessions', requireDev, async (req, res) => {
+    if (String(req.body?.confirmation || '') !== 'DELETE ALL') {
+        return res.status(400).json({ error: 'Confirmation phrase DELETE ALL is required.' });
+    }
+
+    try {
+        const result = await sessionService.removeAll({ reason: 'developer-delete-all' });
+        const registryFailures = [];
+        for (const deleted of result.deleted) {
+            try {
+                await registry.markRemoved(deleted.id);
+                for (const slot of slots.list()) {
+                    if (String(slot.botId || '') === deleted.id) slots.discard(slot.slotId);
+                }
+            } catch (error) {
+                registryFailures.push({ id: deleted.id, reason: error.message });
+            }
+        }
+
+        const failed = [...result.failed, ...registryFailures];
+        console.log(`[ DEV ] Delete-all completed — deleted=${result.deleted.length}, failed=${failed.length}`);
+        res.status(failed.length ? 207 : 200).json({
+            ok: failed.length === 0,
+            total: result.total,
+            deleted: result.deleted.map(item => item.id),
+            failed,
+        });
+    } catch (error) {
+        res.status(500).json({ error: error.message });
+    }
+});
+
 router.post('/dev/api/sessions/:id/reconnect', requireDev, async (req, res) => {
     const id = String(req.params.id);
     const bot = sessionService.get(id);
