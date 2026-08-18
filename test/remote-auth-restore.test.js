@@ -6,6 +6,9 @@ const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
 
+// Keep scheduler regression tests fast; database.js clamps this to >=500ms.
+process.env.JUNE_AUTH_MIRROR_DEBOUNCE_MS = '500';
+
 let dependenciesAvailable = true;
 try { require.resolve('sql.js'); } catch (_) {
   try { require.resolve('better-sqlite3'); } catch (_) { dependenciesAvailable = false; }
@@ -103,6 +106,36 @@ test('auth mirror and shutdown wait for the real MongoDB write acknowledgement',
     await db.shutdownDatabase();
     assert.equal(mirrorFinished, true);
     assert.equal(closedAfterMirror, true);
+  } finally {
+    await db.shutdownDatabase();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('continuous auth mutations cannot starve the scheduled remote mirror', { skip: !dependenciesAvailable }, async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'june-auth-scheduler-'));
+  const database = require('../database');
+  let mirrors = 0;
+  const db = database.createBotDatabase({
+    botId: 'mirror-scheduler-test',
+    dbFile: path.join(dir, 'session.db'),
+    pg: fakeAdapter({ source: 'postgres', snapshot: null, configured: false }),
+    mongo: fakeAdapter({
+      source: 'mongo',
+      snapshot: validSnapshot(),
+      mirrorAuthState: async () => { mirrors += 1; return { acknowledged: true }; },
+    }),
+  });
+
+  try {
+    await db.ready;
+    assert.equal((await db.restoreRemoteAuthState()).restored, true);
+    for (let i = 0; i < 7; i += 1) {
+      assert.equal(db.scheduleRemoteAuthMirror(`mutation-${i}`), true);
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
+    await new Promise(resolve => setTimeout(resolve, 100));
+    assert.ok(mirrors >= 1, 'first scheduled mirror must run despite later mutations');
   } finally {
     await db.shutdownDatabase();
     fs.rmSync(dir, { recursive: true, force: true });
