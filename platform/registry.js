@@ -43,18 +43,35 @@ function fileLoad() {
 }
 
 let _saveTimer = null;
-function fileSave() {
-    // Debounced write — registry updates can burst during GC sweeps.
-    if (_saveTimer) return;
-    _saveTimer = setTimeout(() => {
+let _dirty = false;
+
+function flushFileSave() {
+    if (_saveTimer) {
+        clearTimeout(_saveTimer);
         _saveTimer = null;
-        try {
-            fs.mkdirSync(path.dirname(FILE_PATH), { recursive: true });
-            fs.writeFileSync(FILE_PATH, JSON.stringify(fileCache, null, 2));
-        } catch (err) {
-            console.error('[ PLATFORM ] Registry file save failed:', err.message);
-        }
-    }, 250);
+    }
+    if (!_dirty || !fileCache) return true;
+
+    const directory = path.dirname(FILE_PATH);
+    const temporary = `${FILE_PATH}.tmp-${process.pid}-${Date.now()}`;
+    try {
+        fs.mkdirSync(directory, { recursive: true });
+        fs.writeFileSync(temporary, JSON.stringify(fileCache, null, 2), { encoding: 'utf8', mode: 0o600 });
+        fs.renameSync(temporary, FILE_PATH);
+        _dirty = false;
+        return true;
+    } catch (err) {
+        try { fs.rmSync(temporary, { force: true }); } catch (_) {}
+        console.error('[ PLATFORM ] Registry file save failed:', err.message);
+        return false;
+    }
+}
+
+function fileSave() {
+    _dirty = true;
+    // Debounced atomic write — registry updates can burst during GC sweeps.
+    if (_saveTimer) return;
+    _saveTimer = setTimeout(flushFileSave, 250);
     _saveTimer.unref?.();
 }
 
@@ -153,4 +170,29 @@ async function status() {
     };
 }
 
-module.exports = { init, ipHash, trackSession, markPaired, markRemoved, getSession, listActive, isWebManaged, status };
+async function close() {
+    if (backend === 'file') flushFileSave();
+    if (mongoClient) {
+        try { await mongoClient.close(); } catch (_) {}
+        mongoClient = null;
+        mongoCol = null;
+    }
+}
+
+// Last-resort synchronous flush for ordinary process exits. Graceful shutdown
+// also calls close(), but pending file metadata must survive unexpected exits.
+process.once('exit', () => { if (backend === 'file') flushFileSave(); });
+
+module.exports = {
+    init,
+    ipHash,
+    trackSession,
+    markPaired,
+    markRemoved,
+    getSession,
+    listActive,
+    isWebManaged,
+    status,
+    flush: flushFileSave,
+    close,
+};

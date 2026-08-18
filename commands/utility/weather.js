@@ -20,7 +20,10 @@ module.exports = {
       }
 
       const city = args.join(' ');
-      const apiKey = '4902c0f2550f58298ad4146a92b65e10';
+      const apiKey = process.env.OPENWEATHER_API_KEY || '';
+      if (!apiKey) {
+        return extra.reply('❌ Weather support is not configured. Set OPENWEATHER_API_KEY on the server.');
+      }
 
       await sock.sendMessage(extra.from, { react: { text: '⏳', key: msg.key } });
 

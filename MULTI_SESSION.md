@@ -1,4 +1,4 @@
-# June X — Multi-Session Guide
+# June X Dashboard Edition — Multi-Session Engine Guide
 
 June X now runs **any number of WhatsApp sessions inside one process**. Each
 session is a fully independent bot: its own socket, its own reconnect state
@@ -137,11 +137,15 @@ restart to apply.
   Settings → Linked Devices → Link a Device.
 - The legacy default session still supports the interactive TTY login menu.
 
-### 3. Dashboard
+### 3. Web surfaces
 
-`GET /` shows every session's live state (connected / connecting / needs-login),
-account number and connection time. `GET /health/details` returns the same data
-as JSON.
+- `GET /` — public QR/pairing-code gateway
+- `GET /dev` — password-protected developer fleet control room
+- `GET /status` — engine session status page
+- `GET /health` and `GET /health/details` — health/diagnostics
+
+The web platform uses `platform/sessionService.js`; WhatsApp fleet-management
+commands are not exposed.
 
 ## How isolation works
 

@@ -19,15 +19,18 @@ const slots = require('./slots');
 const registry = require('./registry');
 const ratelimit = require('./ratelimit');
 const sessions = require('./sessions');
+const { clientIp } = require('./clientIp');
 
 const router = Router();
 
-function clientIp(req) {
-    // Behind the reverse proxy, X-Forwarded-For's first hop is the client.
-    const xff = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim();
-    return xff || req.socket?.remoteAddress || 'unknown';
+function noStore(_req, res, next) {
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+    res.set('Pragma', 'no-cache');
+    res.set('Expires', '0');
+    next();
 }
 
+router.use(noStore);
 router.get('/', (_req, res) => res.sendFile(path.join(__dirname, 'public', 'pair.html')));
 
 // ── Create a pairing slot ─────────────────────────────────────────────────────

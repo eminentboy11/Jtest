@@ -213,6 +213,15 @@ test('reconciliation is exposed through the configured internal engine only', as
     assert.deepEqual(fake.calls, [['reconcile']]);
 });
 
+test('platform and engine provisioning share one dashboard capacity', () => {
+    const limits = require('../platform/limits');
+    const ratelimit = require('../platform/ratelimit');
+    assert.equal(ratelimit.MAX_BOTS, limits.MAX_BOTS);
+    assert.equal(ratelimit.stats().maxBots, limits.MAX_BOTS);
+    const indexSource = fs.readFileSync(path.join(__dirname, '..', 'index.js'), 'utf8');
+    assert.match(indexSource, /platformBridge\.platformEnabled \? platformLimits\.MAX_BOTS/);
+});
+
 test('platform modules no longer depend on legacy __JUNE session globals', () => {
     for (const file of ['sessions.js', 'devRoutes.js', 'publicRoutes.js']) {
         const source = fs.readFileSync(path.join(__dirname, '..', 'platform', file), 'utf8');

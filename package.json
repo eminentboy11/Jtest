@@ -27,7 +27,6 @@
         "@bochilteam/scraper-tiktok": "^5.0.0",
         "@vitalets/google-translate-api": "^9.2.1",
         "@whiskeysockets/baileys": "^7.0.0-rc14",
-        "adm-zip": "^0.5.18",
         "awesome-phonenumber": "^7.8.0",
         "axios": "^1.19.0",
         "better-sqlite3": "^12.11.1",
@@ -64,15 +63,24 @@
         "sql.js": "^1.14.1",
         "wa-sticker-formatter": "^4.4.4",
         "webp-converter": "^2.3.3",
+        "ws": "^8.18.0",
         "yt-search": "^2.13.1",
-        "ytdl-core": "^4.11.5",
-        "ws": "^8.18.0"
+        "ytdl-core": "^4.11.5"
     },
     "devDependencies": {
         "nodemon": "^3.1.14"
     },
     "overrides": {
-        "form-data": "^4.0.6"
+        "form-data": "^4.0.6",
+        "wa-sticker-formatter": {
+            "axios": "^1.19.0"
+        },
+        "redstar": {
+            "minimatch": "3.1.4"
+        }
     },
-    "repository": "https://github.com/eminentboy11/June-X-Platform.git"
+    "repository": {
+        "type": "git",
+        "url": "https://github.com/eminentboy11/Jtest.git"
+    }
 }

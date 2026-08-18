@@ -9,7 +9,7 @@ const config     = require('../../config');
 const { getTempDir, deleteTempFile } = require('../../utils/tempManager');
 
 const PACK_SIZE  = 59;
-const TG_TOKEN   = '8773913673:AAGRx9OBJHP1u1mEOKa741Cmmz6woXgXSNY';
+const TG_TOKEN   = process.env.TELEGRAM_BOT_TOKEN || config.telegramToken || '';
 const delay = ms => new Promise(r => setTimeout(r, ms));
 
 async function fetchBuffer(url) {
@@ -101,6 +101,10 @@ module.exports = {
                 `Use a Telegram sticker pack link:\n` +
                 `_https://t.me/addstickers/PackName_`
             );
+        }
+
+        if (!TG_TOKEN) {
+            return reply('❌ Telegram sticker support is not configured. Set TELEGRAM_BOT_TOKEN on the server.');
         }
 
         const packName = url.replace(/https?:\/\/t\.me\/addstickers\//i, '').split('/')[0].trim();

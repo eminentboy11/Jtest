@@ -20,25 +20,40 @@ const registry = require('./registry');
 const ratelimit = require('./ratelimit');
 const sessions = require('./sessions');
 const sessionService = require('./sessionService');
+const { clientIp } = require('./clientIp');
 
 const router = Router();
+router.use((_req, res, next) => {
+    res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+    res.set('Pragma', 'no-cache');
+    res.set('Expires', '0');
+    next();
+});
 
 // ── Token store (Dashboard Edition pattern) ───────────────────────────────────
 const tokens = new Map(); // token -> expiry epoch ms
 const TOKEN_TTL_MS = 8 * 60 * 60 * 1000;
 
 function issueToken() {
+    const now = Date.now();
+    for (const [token, expiry] of tokens) if (expiry <= now) tokens.delete(token);
     const token = crypto.randomBytes(32).toString('hex');
-    tokens.set(token, Date.now() + TOKEN_TTL_MS);
+    tokens.set(token, now + TOKEN_TTL_MS);
     return token;
 }
 
-function checkToken(token) {
-    if (!token) return false;
+function tokenExpiry(token) {
+    if (!token) return null;
     const expiry = tokens.get(token);
-    if (!expiry) return false;
-    if (Date.now() > expiry) { tokens.delete(token); return false; }
-    return true;
+    if (!expiry || Date.now() >= expiry) {
+        if (token) tokens.delete(token);
+        return null;
+    }
+    return expiry;
+}
+
+function checkToken(token) {
+    return Boolean(tokenExpiry(token));
 }
 
 function extractToken(req) {
@@ -59,10 +74,27 @@ router.post('/dev/api/login', (req, res) => {
     if (!configured) {
         return res.status(503).json({ error: 'ADMIN_PASSWORD is not set — the dev panel is disabled until you set it in .env.' });
     }
+
+    const ipHash = registry.ipHash(clientIp(req));
+    const allowed = ratelimit.loginStatus(ipHash);
+    if (!allowed.ok) {
+        res.set('Retry-After', String(Math.max(1, Math.ceil(allowed.retryAfterMs / 1000))));
+        return res.status(429).json({ error: 'Too many login attempts. Try again later.' });
+    }
+
     const supplied = String(req.body?.password || '');
     const a = crypto.createHash('sha256').update(supplied).digest();
     const b = crypto.createHash('sha256').update(String(configured)).digest();
-    if (!crypto.timingSafeEqual(a, b)) return res.status(401).json({ error: 'Incorrect password.' });
+    if (!crypto.timingSafeEqual(a, b)) {
+        const afterFailure = ratelimit.recordLoginFailure(ipHash);
+        if (!afterFailure.ok) {
+            res.set('Retry-After', String(Math.max(1, Math.ceil(afterFailure.retryAfterMs / 1000))));
+            return res.status(429).json({ error: 'Too many login attempts. Try again later.' });
+        }
+        return res.status(401).json({ error: 'Incorrect password.' });
+    }
+
+    ratelimit.clearLoginFailures(ipHash);
     res.json({ ok: true, token: issueToken() });
 });
 
@@ -199,4 +231,4 @@ router.post('/dev/api/gc/run', requireDev, async (_req, res) => {
     res.json({ ok: true, gc: result });
 });
 
-module.exports = { router, checkToken };
+module.exports = { router, checkToken, tokenExpiry };

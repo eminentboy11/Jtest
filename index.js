@@ -150,6 +150,7 @@ const { runInBot, DEFAULT_BOT_ID, getCurrentBotId } = require('./utils/core/botC
 // hit, and its zero-dependency design cannot create require cycles.
 const platformBridge = require('./platform/bridge')
 const platformSessionService = require('./platform/sessionService')
+const platformLimits = require('./platform/limits')
 const {
     claimSuperOwner,
     superOwnerStatusFor,
@@ -644,7 +645,7 @@ async function addSessionViaRegistry(entry = {}, _options = {}) {
         registry,
         runningPhones: sessionManager.list().map((bot) => bot.phone),
         phone,
-        max: process.env.JUNE_MAX_SESSIONS,
+        max: platformBridge.platformEnabled ? platformLimits.MAX_BOTS : process.env.JUNE_MAX_SESSIONS,
     })
     if (!quota.ok) return quota
 
@@ -3189,6 +3190,9 @@ global.__JUNE_SHUTDOWN = async () => {
             })
         }
         try { diskManager?.stop?.() } catch (_) {}
+        if (platformBridge.platformEnabled) {
+            try { await require('./platform').shutdownPlatform() } catch (_) {}
+        }
         try { keepAliveServer?.close?.() } catch (_) {}
         for (const bot of sessionManager.list()) {
             try { await autoExportSessionToRegistry(bot, true) } catch (_) {}
