@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>June-X — Get Your Bot</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  :root { --bg:#03060c; --card:#0a0f1e; --card2:#0e1526; --border:rgba(0,255,224,.12);
+          --cyan:#00ffe0; --amber:#ffb703; --red:#e94560; --text:#e2f0ff; --dim:#8aa2c0; }
+  body { background:radial-gradient(circle at 20% 30%, #0a0f1e, #03060c);
+         font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
+         color:var(--text); min-height:100vh; display:flex; flex-direction:column; align-items:center;
+         padding:2rem 1rem; overflow-x:hidden; }
+  body::before { content:''; position:fixed; inset:0; opacity:.15; pointer-events:none;
+    background-image:radial-gradient(2px 2px at 20px 30px,#00ffe0,rgba(0,0,0,0)),radial-gradient(1px 1px at 80px 140px,#ff6b35,rgba(0,0,0,0)),radial-gradient(3px 3px at 260px 80px,#00aaff,rgba(0,0,0,0));
+    background-size:200px 200px,180px 180px,220px 220px; background-repeat:repeat; }
+  .wrap { max-width:540px; width:100%; z-index:2; position:relative; }
+  .header { text-align:center; margin-bottom:2rem; }
+  .bot-name { font-family:'JetBrains Mono',monospace; font-size:2.4rem; font-weight:700; color:var(--cyan);
+              letter-spacing:.05em; text-shadow:0 0 24px rgba(0,255,224,.4); }
+  .tagline { color:var(--dim); font-size:.9rem; margin-top:.5rem; line-height:1.6; }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:16px; padding:1.75rem;
+          margin-bottom:1.25rem; box-shadow:0 8px 40px rgba(0,0,0,.5); }
+  h2 { font-size:.85rem; letter-spacing:.2em; text-transform:uppercase; color:var(--dim); margin-bottom:1.2rem; text-align:center; }
+  .tabs { display:flex; gap:.5rem; margin-bottom:1.25rem; }
+  .tab { flex:1; text-align:center; padding:.7rem; font-size:.85rem; font-weight:600; border-radius:10px;
+         border:1px solid var(--border); color:var(--dim); cursor:pointer; background:var(--card2); transition:.15s; user-select:none; }
+  .tab.active { color:#03060c; background:var(--cyan); border-color:var(--cyan); }
+  input[type=tel] { width:100%; padding:.9rem 1rem; border-radius:10px; border:1px solid var(--border);
+         background:var(--card2); color:var(--text); font-family:'JetBrains Mono',monospace; font-size:1rem; outline:none; }
+  input[type=tel]:focus { border-color:rgba(0,255,224,.5); }
+  .btn { width:100%; margin-top:.9rem; padding:.95rem; border:none; border-radius:10px; background:var(--cyan);
+         color:#03060c; font-weight:700; font-size:.95rem; letter-spacing:.05em; cursor:pointer; transition:.15s; }
+  .btn:hover { filter:brightness(1.15); } .btn:disabled { opacity:.5; cursor:wait; }
+  .btn.ghost { background:transparent; color:var(--dim); border:1px solid var(--border); }
+  .btn.ghost:hover { color:var(--cyan); border-color:rgba(0,255,224,.4); }
+  .qr-frame { width:280px; height:280px; margin:0 auto; border-radius:14px; background:#fff; display:flex;
+              align-items:center; justify-content:center; overflow:hidden; border:3px solid rgba(0,255,224,.25); }
+  .qr-frame img { width:100%; height:100%; object-fit:contain; }
+  .qr-wait { color:#03060c; font-size:.85rem; text-align:center; padding:1rem; font-weight:600; }
+  .hint { font-size:.8rem; color:var(--dim); text-align:center; line-height:1.8; margin-top:1rem; }
+  .code-out { margin:.9rem 0 0; text-align:center; font-family:'JetBrains Mono',monospace; font-size:2rem;
+              font-weight:700; letter-spacing:.12em; color:var(--cyan); text-shadow:0 0 18px rgba(0,255,224,.5); user-select:all; }
+  .code-meta { text-align:center; font-size:.75rem; color:var(--dim); margin-top:.4rem; }
+  .err-out { margin-top:.9rem; text-align:center; font-size:.85rem; color:var(--red); }
+  .status-line { text-align:center; margin-top:1rem; font-family:'JetBrains Mono',monospace; font-size:.8rem; color:var(--amber); }
+  .success-box { text-align:center; padding:1.2rem 0; }
+  .success-box .big { font-size:3.2rem; }
+  .success-box h3 { color:var(--cyan); margin:.8rem 0 .5rem; font-size:1.15rem; }
+  .success-box p { color:var(--dim); font-size:.9rem; line-height:1.8; }
+  .countdown { font-family:'JetBrains Mono',monospace; color:var(--dim); font-size:.75rem; text-align:center; margin-top:.9rem; }
+  .hidden { display:none !important; }
+  .steps { margin-top:1.2rem; font-size:.82rem; color:var(--dim); line-height:2; }
+  .steps b { color:var(--text); }
+</style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="header">
+      <div class="bot-name">JUNE-X</div>
+      <div class="tagline">Get your own WhatsApp bot in under a minute.<br>No signup. Scan a QR or enter a code — that's it.</div>
+    </div>
+
+    <!-- Step 1: choose method -->
+    <div class="card" id="createCard">
+      <h2>Link your WhatsApp</h2>
+      <div class="tabs">
+        <div class="tab active" id="tabQR">Scan QR</div>
+        <div class="tab" id="tabCode">Pairing Code</div>
+      </div>
+      <div id="panelCode" class="hidden">
+        <input type="tel" id="phoneInput" placeholder="234xxxxxxxxxx  (country code, digits only)">
+      </div>
+      <button class="btn" id="createBtn">⚡ Create My Bot</button>
+      <div class="err-out hidden" id="createErr"></div>
+      <div class="hint">Your bot runs on our server. Once linked, you control it entirely from WhatsApp.</div>
+    </div>
+
+    <!-- Step 2: active slot -->
+    <div class="card hidden" id="slotCard">
+      <h2 id="slotTitle">Link your WhatsApp</h2>
+
+      <div id="qrView" class="hidden">
+        <div class="qr-frame"><div class="qr-wait" id="qrWait">Starting your bot…<br>QR appears in a few seconds</div><img id="qrImg" class="hidden" alt="WhatsApp QR"></div>
+        <div class="steps">📱 WhatsApp → <b>Settings</b> → <b>Linked Devices</b> → <b>Link a Device</b> → scan.<br>The code refreshes automatically.</div>
+      </div>
+
+      <div id="codeView" class="hidden">
+        <div class="qr-wait" style="color:var(--dim);background:transparent" id="codeWait">Requesting your pairing code…</div>
+        <div class="code-out hidden" id="codeOut"></div>
+        <div class="code-meta hidden" id="codeMeta"></div>
+        <button class="btn ghost hidden" id="moreCodeBtn">Get another code</button>
+        <div class="steps">📱 WhatsApp → <b>Linked Devices</b> → <b>Link a Device</b> → <b>Link with phone number instead</b> → enter the code.</div>
+      </div>
+
+      <div class="err-out hidden" id="slotErr"></div>
+      <div class="countdown" id="countdown"></div>
+      <button class="btn ghost" id="cancelBtn" style="margin-top:1rem">Start over</button>
+    </div>
+
+    <!-- Step 3: success -->
+    <div class="card hidden" id="doneCard">
+      <div class="success-box">
+        <div class="big">🎉</div>
+        <h3>Your June-X bot is live!</h3>
+        <p id="doneNum"></p>
+        <p>You can close this page — everything else happens inside WhatsApp.<br>
+        Send <b style="color:var(--cyan)">.menu</b> to your own number to see all commands.</p>
+        <button class="btn" style="max-width:260px;margin-top:1.2rem" onclick="location.reload()">Create another bot</button>
+      </div>
+    </div>
+  </div>
+
+<script>
+(function () {
+  var mode = 'qr';
+  var slot = null;
+  var ws = null;
+  var countdownTimer = null;
+
+  var $ = function (id) { return document.getElementById(id); };
+
+  // ── Tabs ──
+  $('tabQR').onclick = function () { mode = 'qr'; $('tabQR').classList.add('active'); $('tabCode').classList.remove('active'); $('panelCode').classList.add('hidden'); };
+  $('tabCode').onclick = function () { mode = 'code'; $('tabCode').classList.add('active'); $('tabQR').classList.remove('active'); $('panelCode').classList.remove('hidden'); };
+
+  // ── Create slot ──
+  $('createBtn').onclick = function () {
+    var err = $('createErr'); err.classList.add('hidden');
+    var body = { mode: mode };
+    if (mode === 'code') {
+      var phone = $('phoneInput').value.trim();
+      if (!phone) { err.textContent = 'Enter your phone number first.'; err.classList.remove('hidden'); return; }
+      body.phoneNumber = phone;
+    }
+    var btn = $('createBtn'); btn.disabled = true; btn.textContent = 'Creating your bot…';
+    fetch('/api/slots', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+      .then(function (res) {
+        if (!res.ok) { err.textContent = res.d.error || 'Failed — try again.'; err.classList.remove('hidden'); return; }
+        slot = res.d.slot;
+        showSlot();
+      })
+      .catch(function () { err.textContent = 'Network error — try again.'; err.classList.remove('hidden'); })
+      .finally(function () { btn.disabled = false; btn.textContent = '⚡ Create My Bot'; });
+  };
+
+  function showSlot() {
+    $('createCard').classList.add('hidden');
+    $('slotCard').classList.remove('hidden');
+    if (slot.mode === 'qr') { $('qrView').classList.remove('hidden'); $('slotTitle').textContent = 'Scan with WhatsApp'; }
+    else { $('codeView').classList.remove('hidden'); $('slotTitle').textContent = 'Your pairing code'; }
+    applySlot(slot);
+    connectWS();
+    startCountdown();
+    pollLoop();
+  }
+
+  function applySlot(s) {
+    slot = s;
+    if (s.status === 'paired') return showDone();
+    if (s.status === 'expired') return showSlotError('This session expired. Start over to create a new bot.');
+    if (s.status === 'failed') return showSlotError(s.error || 'Pairing failed. Start over to try again.');
+
+    if (s.mode === 'qr' && s.qr && s.qr.dataUrl) {
+      $('qrImg').src = s.qr.dataUrl;
+      $('qrImg').classList.remove('hidden');
+      $('qrWait').classList.add('hidden');
+    }
+    if (s.mode === 'code' && s.codes && s.codes.length) {
+      var last = s.codes[s.codes.length - 1];
+      $('codeOut').textContent = last.code;
+      $('codeOut').classList.remove('hidden');
+      $('codeMeta').textContent = 'Code ' + s.attemptsUsed + ' of ' + s.attemptsLimit;
+      $('codeMeta').classList.remove('hidden');
+      $('codeWait').classList.add('hidden');
+      if (s.attemptsUsed < s.attemptsLimit) $('moreCodeBtn').classList.remove('hidden');
+      else $('moreCodeBtn').classList.add('hidden');
+    }
+  }
+
+  function showSlotError(text) {
+    $('slotErr').textContent = text;
+    $('slotErr').classList.remove('hidden');
+    clearInterval(countdownTimer);
+  }
+
+  function showDone() {
+    clearInterval(countdownTimer);
+    if (ws) try { ws.close(); } catch (e) {}
+    $('slotCard').classList.add('hidden');
+    $('doneCard').classList.remove('hidden');
+    $('doneNum').textContent = slot.botNum ? 'Linked to +' + slot.botNum : '';
+  }
+
+  // ── Live updates ──
+  function connectWS() {
+    var proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
+    ws = new WebSocket(proto + location.host);
+    ws.onopen = function () { ws.send(JSON.stringify({ type: 'watch_slot', slotId: slot.slotId })); };
+    ws.onmessage = function (ev) {
+      try {
+        var m = JSON.parse(ev.data);
+        if (m.type === 'slot' && m.slotId === slot.slotId) applySlot(m.slot);
+      } catch (e) {}
+    };
+    ws.onclose = function () { if (slot && slot.status === 'waiting') setTimeout(connectWS, 3000); };
+  }
+
+  function pollLoop() { // fallback for WS-blocked environments
+    if (!slot || slot.status !== 'waiting') return;
+    fetch('/api/slots/' + slot.slotId)
+      .then(function (r) { return r.ok ? r.json() : null; })
+      .then(function (d) { if (d && d.slot) applySlot(d.slot); })
+      .catch(function () {})
+      .finally(function () { if (slot && slot.status === 'waiting') setTimeout(pollLoop, 8000); });
+  }
+
+  function startCountdown() {
+    countdownTimer = setInterval(function () {
+      if (!slot) return;
+      var left = Math.max(0, slot.expiresAt - Date.now());
+      var m = Math.floor(left / 60000), s = Math.floor(left % 60000 / 1000);
+      $('countdown').textContent = slot.status === 'waiting' ? ('Session expires in ' + m + ':' + String(s).padStart(2, '0')) : '';
+      if (left <= 0) clearInterval(countdownTimer);
+    }, 1000);
+  }
+
+  // ── Extra pairing code ──
+  $('moreCodeBtn').onclick = function () {
+    var btn = $('moreCodeBtn'); btn.disabled = true; btn.textContent = 'Requesting…';
+    fetch('/api/slots/' + slot.slotId + '/code', { method: 'POST' })
+      .then(function (r) { return r.json().then(function (d) { return { ok: r.ok, d: d }; }); })
+      .then(function (res) {
+        if (res.ok) applySlot(res.d.slot);
+        else showSlotError(res.d.error || 'Could not get another code.');
+      })
+      .catch(function () {})
+      .finally(function () { btn.disabled = false; btn.textContent = 'Get another code'; });
+  };
+
+  $('cancelBtn').onclick = function () { location.reload(); };
+})();
+</script>
+</body>
+</html>

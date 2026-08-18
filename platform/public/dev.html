@@ -1,0 +1,293 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>June-X Platform — Dev Control Room</title>
+<style>
+  * { margin:0; padding:0; box-sizing:border-box; }
+  :root { --bg:#03060c; --card:#0a0f1e; --card2:#0e1526; --border:rgba(0,255,224,.12);
+          --cyan:#00ffe0; --amber:#ffb703; --red:#e94560; --green:#22e37f; --text:#e2f0ff; --dim:#8aa2c0; }
+  body { background:radial-gradient(circle at 20% 30%, #0a0f1e, #03060c);
+         font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',system-ui,sans-serif;
+         color:var(--text); min-height:100vh; padding:1.5rem 1rem; }
+  .wrap { max-width:1080px; margin:0 auto; }
+  .topbar { display:flex; align-items:center; justify-content:space-between; margin-bottom:1.4rem; flex-wrap:wrap; gap:.75rem; }
+  .brand { font-family:'JetBrains Mono',monospace; font-size:1.25rem; font-weight:700; color:var(--cyan);
+           letter-spacing:.05em; text-shadow:0 0 18px rgba(0,255,224,.35); }
+  .brand small { color:var(--dim); font-size:.62rem; letter-spacing:.3em; display:block; margin-top:.15rem; }
+  .card { background:var(--card); border:1px solid var(--border); border-radius:14px; padding:1.3rem; margin-bottom:1.1rem; }
+  h2 { font-size:.75rem; letter-spacing:.2em; text-transform:uppercase; color:var(--dim); margin-bottom:1rem; display:flex; justify-content:space-between; align-items:center; }
+  input { width:100%; padding:.8rem .95rem; border-radius:10px; border:1px solid var(--border); background:var(--card2);
+          color:var(--text); font-family:'JetBrains Mono',monospace; font-size:.92rem; outline:none; }
+  input:focus { border-color:rgba(0,255,224,.5); }
+  .btn { padding:.6rem 1.1rem; border:none; border-radius:9px; background:var(--cyan); color:#03060c;
+         font-weight:700; font-size:.8rem; cursor:pointer; transition:.15s; }
+  .btn:hover { filter:brightness(1.15); } .btn:disabled { opacity:.5; cursor:wait; }
+  .btn.ghost { background:transparent; color:var(--dim); border:1px solid var(--border); }
+  .btn.ghost:hover { color:var(--cyan); border-color:rgba(0,255,224,.4); }
+  .btn.danger { background:transparent; color:var(--red); border:1px solid rgba(233,69,96,.4); }
+  .btn.danger:hover { background:rgba(233,69,96,.1); }
+  .btn.sm { padding:.35rem .7rem; font-size:.72rem; }
+  .grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:.8rem; }
+  .stat { background:var(--card2); border:1px solid var(--border); border-radius:12px; padding:.9rem; }
+  .stat .k { font-size:.6rem; letter-spacing:.18em; text-transform:uppercase; color:var(--dim); }
+  .stat .v { font-family:'JetBrains Mono',monospace; font-size:1.1rem; font-weight:700; color:var(--cyan); margin-top:.35rem; word-break:break-all; }
+  .stat .v.warn { color:var(--amber); } .stat .v.err { color:var(--red); } .stat .v.ok { color:var(--green); }
+  table { width:100%; border-collapse:collapse; font-size:.8rem; }
+  th { text-align:left; color:var(--dim); font-size:.65rem; letter-spacing:.15em; text-transform:uppercase;
+       padding:.5rem .6rem; border-bottom:1px solid var(--border); }
+  td { padding:.55rem .6rem; border-bottom:1px solid rgba(255,255,255,.04); font-family:'JetBrains Mono',monospace; vertical-align:middle; }
+  .state { display:inline-block; padding:.18rem .55rem; border-radius:999px; font-size:.68rem; font-weight:600; border:1px solid; }
+  .state.connected  { color:var(--green); border-color:rgba(34,227,127,.4); }
+  .state.connecting { color:var(--amber); border-color:rgba(255,183,3,.4); }
+  .state.needs-login{ color:var(--red);   border-color:rgba(233,69,96,.4); }
+  .state.disconnected { color:var(--dim); border-color:var(--border); }
+  .state.waiting { color:var(--amber); border-color:rgba(255,183,3,.4); }
+  .state.paired  { color:var(--green); border-color:rgba(34,227,127,.4); }
+  .state.expired, .state.failed { color:var(--dim); border-color:var(--border); }
+  .logbox { background:#050910; border:1px solid var(--border); border-radius:10px; height:300px; overflow-y:auto;
+            padding:.9rem; font-family:'JetBrains Mono',monospace; font-size:.72rem; line-height:1.6; }
+  .logbox .warn { color:var(--amber); } .logbox .error { color:var(--red); } .logbox .info { color:#9fc3e8; }
+  .logbox .ts { color:#4a5c74; margin-right:.5rem; }
+  .msg { margin-top:.6rem; font-size:.8rem; } .msg.ok { color:var(--green); } .msg.err { color:var(--red); }
+  .hidden { display:none !important; }
+  .login-wrap { max-width:380px; margin:14vh auto 0; }
+  .login-wrap .brand { text-align:center; font-size:1.6rem; margin-bottom:1.4rem; }
+  .empty { color:var(--dim); font-size:.8rem; text-align:center; padding:1rem; }
+  .actions-cell { display:flex; gap:.35rem; flex-wrap:wrap; }
+  .badge { font-size:.62rem; color:var(--cyan); border:1px solid rgba(0,255,224,.3); padding:.1rem .4rem; border-radius:6px; }
+</style>
+</head>
+<body>
+
+  <div class="login-wrap" id="loginView">
+    <div class="brand" style="text-align:center">JUNE-X<small>DEV CONTROL ROOM</small></div>
+    <div class="card">
+      <h2>Developer sign in</h2>
+      <input type="password" id="pwInput" placeholder="ADMIN_PASSWORD" autofocus>
+      <button class="btn" id="loginBtn" style="width:100%;margin-top:.9rem;padding:.85rem">Login</button>
+      <div class="msg err hidden" id="loginErr"></div>
+    </div>
+  </div>
+
+  <div class="wrap hidden" id="panelView">
+    <div class="topbar">
+      <div class="brand">JUNE-X PLATFORM<small>DEV CONTROL ROOM</small></div>
+      <div style="display:flex;gap:.6rem">
+        <a href="/"><button class="btn ghost">Public Gateway</button></a>
+        <button class="btn ghost" id="gcBtn">Run GC</button>
+        <button class="btn ghost" id="logoutBtn">Sign out</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2>Platform Overview</h2>
+      <div class="grid" id="overviewGrid"></div>
+    </div>
+
+    <div class="card">
+      <h2><span>Sessions</span><span id="sessionCount" style="letter-spacing:0"></span></h2>
+      <div style="overflow-x:auto">
+      <table><thead><tr><th>ID</th><th>State</th><th>Account</th><th>Source</th><th>Pairing</th><th>Actions</th></tr></thead>
+      <tbody id="sessionsBody"></tbody></table>
+      </div>
+      <div class="empty hidden" id="sessionsEmpty">No sessions yet.</div>
+      <div class="msg hidden" id="sessMsg"></div>
+    </div>
+
+    <div class="card">
+      <h2><span>Pairing Slots</span><span id="slotCount" style="letter-spacing:0"></span></h2>
+      <div style="overflow-x:auto">
+      <table><thead><tr><th>Slot</th><th>Mode</th><th>Status</th><th>Bot</th><th>Codes</th><th>Expires</th><th></th></tr></thead>
+      <tbody id="slotsBody"></tbody></table>
+      </div>
+      <div class="empty hidden" id="slotsEmpty">No active pairing slots.</div>
+    </div>
+
+    <div class="card">
+      <h2>Live Logs</h2>
+      <div class="logbox" id="logBox"></div>
+    </div>
+  </div>
+
+<script>
+(function () {
+  var TOKEN_KEY = 'junex_dev_token';
+  var token = localStorage.getItem(TOKEN_KEY) || '';
+  var ws = null;
+  var $ = function (id) { return document.getElementById(id); };
+
+  function H() { return { 'Authorization': 'Bearer ' + token, 'Content-Type': 'application/json' }; }
+  function esc(t) { var e = document.createElement('span'); e.textContent = String(t == null ? '' : t); return e.innerHTML; }
+  function fmtUp(s) { var d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60); return (d?d+'d ':'')+h+'h '+m+'m'; }
+  function ago(ts) { if(!ts) return '—'; var s=Math.floor((Date.now()-ts)/1000); if(s<60) return s+'s'; if(s<3600) return Math.floor(s/60)+'m'; return Math.floor(s/3600)+'h'; }
+
+  // ── Auth ──
+  if (token) {
+    fetch('/dev/api/me', { headers: H() }).then(function (r) {
+      if (r.ok) showPanel(); else { localStorage.removeItem(TOKEN_KEY); token=''; }
+    }).catch(function () {});
+  }
+  $('loginBtn').onclick = doLogin;
+  $('pwInput').addEventListener('keydown', function (e) { if (e.key === 'Enter') doLogin(); });
+  function doLogin() {
+    fetch('/dev/api/login', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ password: $('pwInput').value }) })
+      .then(function (r) { return r.json().then(function (d) { return { ok:r.ok, d:d }; }); })
+      .then(function (res) {
+        if (res.ok && res.d.token) { token = res.d.token; localStorage.setItem(TOKEN_KEY, token); showPanel(); }
+        else { $('loginErr').textContent = res.d.error || 'Login failed.'; $('loginErr').classList.remove('hidden'); }
+      }).catch(function () { $('loginErr').textContent = 'Network error.'; $('loginErr').classList.remove('hidden'); });
+  }
+  $('logoutBtn').onclick = function () {
+    fetch('/dev/api/logout', { method:'POST', headers: H() }).catch(function(){});
+    localStorage.removeItem(TOKEN_KEY); location.reload();
+  };
+
+  function showPanel() {
+    $('loginView').classList.add('hidden');
+    $('panelView').classList.remove('hidden');
+    refreshAll(); connectWS();
+    setInterval(refreshAll, 6000);
+  }
+
+  function refreshAll() { refreshOverview(); refreshSessions(); refreshSlots(); }
+
+  // ── Overview ──
+  function refreshOverview() {
+    fetch('/dev/api/overview', { headers: H() }).then(function (r) {
+      if (r.status === 401) { localStorage.removeItem(TOKEN_KEY); location.reload(); }
+      return r.json();
+    }).then(function (o) {
+      if (!o || !o.sessions) return;
+      var reg = o.registry || {};
+      var regV = reg.backend === 'mongo' ? (reg.mongoOk ? 'Mongo ✓' : 'Mongo ✗') : 'JSON file';
+      var regC = reg.backend === 'mongo' ? (reg.mongoOk ? 'ok' : 'err') : 'warn';
+      var cells = [
+        ['Sessions', o.sessions.total, ''],
+        ['Connected', o.sessions.connected, o.sessions.connected ? 'ok' : ''],
+        ['Needs login', o.sessions.needsLogin, o.sessions.needsLogin ? 'warn' : ''],
+        ['Slots waiting', o.slots.waiting, o.slots.waiting ? 'warn' : ''],
+        ['RAM (RSS)', Math.round(o.process.memory.rss/1048576)+' MB', ''],
+        ['Uptime', fmtUp(o.process.uptime), ''],
+        ['Registry', regV, regC],
+        ['GC runs', o.gc.runs + (o.gc.lastError ? ' ⚠' : ''), o.gc.lastError ? 'err' : ''],
+        ['Bots removed (GC)', o.gc.sessionsRemoved, ''],
+        ['Cap', o.sessions.total + ' / ' + o.limits.maxBots, ''],
+        ['Creates/IP/h', o.limits.perIpPerHour, ''],
+        ['Node', o.process.nodeVersion, ''],
+      ];
+      $('overviewGrid').innerHTML = cells.map(function (c) {
+        return '<div class="stat"><div class="k">'+esc(c[0])+'</div><div class="v '+c[2]+'">'+esc(c[1])+'</div></div>';
+      }).join('');
+    }).catch(function () {});
+  }
+
+  // ── Sessions ──
+  function refreshSessions() {
+    fetch('/dev/api/sessions', { headers: H() }).then(function (r) { return r.json(); }).then(function (d) {
+      var list = d.sessions || [];
+      $('sessionCount').textContent = list.length + ' total';
+      $('sessionsEmpty').classList.toggle('hidden', list.length > 0);
+      $('sessionsBody').innerHTML = list.map(function (s) {
+        var pairing = s.pairingActive ? (s.pairingAttempts + '/3' + (s.pairingExhausted ? ' ⛔' : '')) : '—';
+        return '<tr>' +
+          '<td>' + esc(s.id) + (s.webManaged ? ' <span class="badge">web·' + esc(s.mode || '?') + '</span>' : '') + '</td>' +
+          '<td><span class="state ' + esc(s.state) + '">' + esc(s.state) + '</span></td>' +
+          '<td>' + esc(s.account || s.phone || '—') + '</td>' +
+          '<td>' + (s.webManaged ? 'gateway' : 'registry') + '</td>' +
+          '<td>' + esc(pairing) + '</td>' +
+          '<td class="actions-cell">' +
+            '<button class="btn ghost sm" onclick="devAct(\'reconnect\',\'' + esc(s.id) + '\')">Reconnect</button>' +
+            '<button class="btn ghost sm" onclick="devAct(\'stop\',\'' + esc(s.id) + '\')">Stop</button>' +
+            '<button class="btn danger sm" onclick="devDel(\'' + esc(s.id) + '\')">Delete</button>' +
+          '</td></tr>';
+      }).join('');
+    }).catch(function () {});
+  }
+
+  window.devAct = function (action, id) {
+    fetch('/dev/api/sessions/' + encodeURIComponent(id) + '/' + action, { method:'POST', headers:H() })
+      .then(function (r) { return r.json().then(function (d) { return { ok:r.ok, d:d }; }); })
+      .then(function (res) { flash('sessMsg', res.ok, res.ok ? (res.d.message || action + ' ok') : (res.d.error || 'failed')); refreshSessions(); });
+  };
+  window.devDel = function (id) {
+    if (!confirm('DELETE session "' + id + '"?\n\nThis permanently removes its auth, database and registry entry.')) return;
+    fetch('/dev/api/sessions/' + encodeURIComponent(id), { method:'DELETE', headers:H() })
+      .then(function (r) { return r.json().then(function (d) { return { ok:r.ok, d:d }; }); })
+      .then(function (res) { flash('sessMsg', res.ok, res.ok ? 'Session deleted.' : (res.d.error || 'failed')); refreshAll(); });
+  };
+  window.devSlotKill = function (slotId) {
+    fetch('/dev/api/slots/' + encodeURIComponent(slotId), { method:'DELETE', headers:H() })
+      .then(function () { refreshSlots(); });
+  };
+
+  function flash(id, ok, text) {
+    var el = $(id); el.textContent = (ok ? '✅ ' : '❌ ') + text;
+    el.className = 'msg ' + (ok ? 'ok' : 'err');
+    el.classList.remove('hidden');
+    setTimeout(function () { el.classList.add('hidden'); }, 5000);
+  }
+
+  // ── Slots ──
+  function refreshSlots() {
+    fetch('/dev/api/slots', { headers: H() }).then(function (r) { return r.json(); }).then(function (d) {
+      var list = d.slots || [];
+      $('slotCount').textContent = d.stats ? (d.stats.waiting + ' waiting · ' + list.length + ' tracked') : '';
+      $('slotsEmpty').classList.toggle('hidden', list.length > 0);
+      $('slotsBody').innerHTML = list.map(function (s) {
+        var exp = s.status === 'waiting' ? ago(s.expiresAt - 2 * (s.expiresAt - Date.now())) : '—';
+        var left = s.status === 'waiting' ? Math.max(0, Math.round((s.expiresAt - Date.now()) / 60000)) + 'm' : '—';
+        return '<tr>' +
+          '<td>' + esc(s.slotId.slice(0, 8)) + '…</td>' +
+          '<td>' + esc(s.mode) + '</td>' +
+          '<td><span class="state ' + esc(s.status) + '">' + esc(s.status) + '</span></td>' +
+          '<td>' + esc(s.botId || '—') + '</td>' +
+          '<td>' + s.attemptsUsed + '/' + s.attemptsLimit + '</td>' +
+          '<td>' + left + '</td>' +
+          '<td>' + (s.status === 'waiting' ? '<button class="btn danger sm" onclick="devSlotKill(\'' + esc(s.slotId) + '\')">Expire</button>' : '') + '</td>' +
+          '</tr>';
+      }).join('');
+    }).catch(function () {});
+  }
+
+  // ── GC ──
+  $('gcBtn').onclick = function () {
+    var b = $('gcBtn'); b.disabled = true;
+    fetch('/dev/api/gc/run', { method:'POST', headers:H() })
+      .then(function (r) { return r.json(); })
+      .then(function () { refreshAll(); })
+      .finally(function () { b.disabled = false; });
+  };
+
+  // ── Logs (WS) ──
+  function addLog(entry) {
+    var box = $('logBox');
+    var atBottom = box.scrollTop + box.clientHeight >= box.scrollHeight - 40;
+    var div = document.createElement('div');
+    div.className = entry.level;
+    div.innerHTML = '<span class="ts">' + new Date(entry.ts).toTimeString().slice(0,8) + '</span>' + esc(entry.msg);
+    box.appendChild(div);
+    while (box.children.length > 500) box.removeChild(box.firstChild);
+    if (atBottom) box.scrollTop = box.scrollHeight;
+  }
+
+  function connectWS() {
+    if (ws) try { ws.close(); } catch (e) {}
+    var proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
+    ws = new WebSocket(proto + location.host);
+    ws.onopen = function () { ws.send(JSON.stringify({ type:'auth', token: token })); };
+    ws.onmessage = function (ev) {
+      try {
+        var m = JSON.parse(ev.data);
+        if (m.type === 'log') addLog(m.entry);
+        if (m.type === 'log_snapshot') { $('logBox').innerHTML=''; (m.logs||[]).forEach(addLog); $('logBox').scrollTop = $('logBox').scrollHeight; }
+        if (m.type === 'slot') { refreshSlots(); }
+      } catch (e) {}
+    };
+    ws.onclose = function () { if (token) setTimeout(connectWS, 3000); };
+  }
+})();
+</script>
+</body>
+</html>

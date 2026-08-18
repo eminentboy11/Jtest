@@ -1,0 +1,170 @@
+const axios = require('axios');
+
+const NEKOS_ENDPOINTS = new Set([
+    'hug', 'kiss', 'pat', 'slap', 'cry', 'wave', 'poke', 'cuddle',
+    'smile', 'laugh', 'dance', 'happy', 'wink', 'blush', 'bite',
+    'bored', 'facepalm', 'feed', 'handhold', 'highfive', 'kick',
+    'kill', 'punch', 'shoot', 'shrug', 'sleep', 'stare', 'tickle',
+    'yeet', 'nom', 'bonk', 'glomp', 'angry', 'nod', 'run', 'smug'
+]);
+
+const NEKOS_NAME_MAP = {
+    'thinking': 'think',
+    'kick3': 'kick'
+};
+
+const fetchReactionImage = async ({ sock, msg, extra, command }) => {
+    const from = extra.from || msg.key.remoteJid;
+    try {
+        let imageUrl = null;
+
+        const nekosEndpoint = NEKOS_NAME_MAP[command] || command;
+
+        if (NEKOS_ENDPOINTS.has(nekosEndpoint)) {
+            try {
+                const { data } = await axios.get(`https://nekos.best/api/v2/${nekosEndpoint}`, { timeout: 15000 });
+                imageUrl = data?.results?.[0]?.url || null;
+            } catch (_) {}
+        }
+
+        if (!imageUrl) {
+            try {
+                const { data } = await axios.get(`https://api.waifu.pics/sfw/${command}`, { timeout: 15000 });
+                imageUrl = data?.url || null;
+            } catch (_) {}
+        }
+
+        if (!imageUrl) throw new Error('No image URL returned from any source');
+
+        const response = await axios.get(imageUrl, { responseType: 'arraybuffer', timeout: 20000 });
+        const buffer = Buffer.from(response.data);
+
+        const label = command.replace(/[0-9]/g, '').replace(/_/g, ' ');
+        await sock.sendMessage(from, {
+            image: buffer,
+            caption: `_${label.charAt(0).toUpperCase() + label.slice(1)}_`
+        }, { quoted: msg });
+
+    } catch (error) {
+        await extra.reply(global.mess?.error || '❌ Failed to fetch reaction image.');
+    }
+};
+
+module.exports = [
+    { command: ['kiss', 'cium', 'beso'], name: 'kiss', category: 'reaction', description: 'Send a kiss reaction GIF', usage: '.kiss',
+      execute: async (sock, msg, args, extra) => { await fetchReactionImage({ sock, msg, extra, command: 'kiss' }); } },
+    { command: ['cry'], name: 'cry', category: 'reaction', description: 'Send a cry reaction GIF', usage: '.cry',
+      execute: async (sock, msg, args, extra) => { await fetchReactionImage({ sock, msg, extra, command: 'cry' }); } },
+    { command: ['blush'], name: 'blush', category: 'reaction', description: 'Send a blush reaction GIF', usage: '.blush',
+      execute: async (sock, msg, args, extra) => { await fetchReactionImage({ sock, msg, extra, command: 'blush' }); } },
+    { command: ['dance'], name: 'dance', category: 'reaction', description: 'Send a dance reaction GIF', usage: '.dance',
+      execute: async (sock, msg, args, extra) => { await fetchReactionImage({ sock, msg, extra, command: 'dance' }); } },
+    { command: ['kill'], name: 'kill', category: 'reaction', description: 'Send a kill reaction GIF', usage: '.kill',
+      execute: async (sock, msg, args, extra) => { await fetchReactionImage({ sock, msg, extra, command: 'kill' }); } },
+    { command: ['hug'], name: 'hug', category: 'reaction', description: 'Send a hug reaction GIF', usage: '.hug',
+      execute: async (sock, msg, args, extra) => { await fetchReactionImage({ sock, msg, extra, command: 'hug' }); } },
+    { command: ['kick', 'kick3'], name: 'kick', category: 'reaction', description: 'Send a kick reaction GIF', usage: '.kick',
+      execute: async (sock, msg, args, extra) => { await fetchReactionImage({ sock, msg, extra, command: 'kick' }); } },
+    { command: ['slap'], name: 'slap', category: 'reaction', description: 'Send a slap reaction GIF', usage: '.slap',
+      execute: async (sock, msg, args, extra) => { await fetchReactionImage({ sock, msg, extra, command: 'slap' }); } },
+    { command: ['happy'], name: 'happy', category: 'reaction', description: 'Send a happy reaction GIF', usage: '.happy',
+      execute: async (sock, msg, args, extra) => { await fetchReactionImage({ sock, msg, extra, command: 'happy' }); } },
+    { command: ['bully'], name: 'bully', category: 'reaction', description: 'Send a bully reaction GIF', usage: '.bully',
+      execute: async (sock, msg, args, extra) => { await fetchReactionImage({ sock, msg, extra, command: 'bully' }); } },
+    { command: ['pat', 'headpat'], name: 'pat', category: 'reaction', description: 'Send a head pat reaction GIF', usage: '.pat',
+      execute: async (sock, msg, args, extra) => { await fetchReactionImage({ sock, msg, extra, command: 'pat' }); } },
+    { command: ['wink'], name: 'wink', category: 'reaction', description: 'Send a wink reaction GIF', usage: '.wink',
+      execute: async (sock, msg, args, extra) => { await fetchReactionImage({ sock, msg, extra, command: 'wink' }); } },
+    { command: ['poke'], name: 'poke', category: 'reaction', description: 'Send a poke reaction GIF', usage: '.poke',
+      execute: async (sock, msg, args, extra) => { await fetchReactionImage({ sock, msg, extra, command: 'poke' }); } },
+    { command: ['cuddle'], name: 'cuddle', category: 'reaction', description: 'Send a cuddle reaction GIF', usage: '.cuddle',
+      execute: async (sock, msg, args, extra) => { await fetchReactionImage({ sock, msg, extra, command: 'cuddle' }); } },
+    { command: ['highfive', 'hi5'], name: 'highfive', category: 'reaction', description: 'Send a high five reaction GIF', usage: '.highfive',
+      execute: async (sock, msg, args, extra) => { await fetchReactionImage({ sock, msg, extra, command: 'highfive' }); } },
+    { command: ['smile'], name: 'smile', category: 'reaction', description: 'Send a smile reaction GIF', usage: '.smile',
+      execute: async (sock, msg, args, extra) => { await fetchReactionImage({ sock, msg, extra, command: 'smile' }); } },
+    { command: ['wave'], name: 'wave', category: 'reaction', description: 'Send a wave reaction GIF', usage: '.wave',
+      execute: async (sock, msg, args, extra) => { await fetchReactionImage({ sock, msg, extra, command: 'wave' }); } },
+    { command: ['bite'], name: 'bite', category: 'reaction', description: 'Send a bite reaction GIF', usage: '.bite',
+      execute: async (sock, msg, args, extra) => { await fetchReactionImage({ sock, msg, extra, command: 'bite' }); } },
+    { command: ['lick'], name: 'lick', category: 'reaction', description: 'Send a lick reaction GIF', usage: '.lick',
+      execute: async (sock, msg, args, extra) => { await fetchReactionImage({ sock, msg, extra, command: 'lick' }); } },
+    { command: ['bonk'], name: 'bonk', category: 'reaction', description: 'Send a bonk reaction GIF', usage: '.bonk',
+      execute: async (sock, msg, args, extra) => { await fetchReactionImage({ sock, msg, extra, command: 'bonk' }); } },
+    { command: ['yeet'], name: 'yeet', category: 'reaction', description: 'Send a yeet reaction GIF', usage: '.yeet',
+      execute: async (sock, msg, args, extra) => { await fetchReactionImage({ sock, msg, extra, command: 'yeet' }); } },
+    { command: ['glomp'], name: 'glomp', category: 'reaction', description: 'Send a glomp reaction GIF', usage: '.glomp',
+      execute: async (sock, msg, args, extra) => { await fetchReactionImage({ sock, msg, extra, command: 'glomp' }); } },
+    { command: ['stab'], name: 'stab', category: 'reaction', description: 'Send a stab reaction GIF', usage: '.stab',
+      execute: async (sock, msg, args, extra) => { await fetchReactionImage({ sock, msg, extra, command: 'stab' }); } },
+    { command: ['nom'], name: 'nom', category: 'reaction', description: 'Send a nom reaction GIF', usage: '.nom',
+      execute: async (sock, msg, args, extra) => { await fetchReactionImage({ sock, msg, extra, command: 'nom' }); } },
+    { command: ['tickle'], name: 'tickle', category: 'reaction', description: 'Send a tickle reaction GIF', usage: '.tickle',
+      execute: async (sock, msg, args, extra) => { await fetchReactionImage({ sock, msg, extra, command: 'tickle' }); } },
+    { command: ['throw'], name: 'throw', category: 'reaction', description: 'Send a throw reaction GIF', usage: '.throw',
+      execute: async (sock, msg, args, extra) => { await fetchReactionImage({ sock, msg, extra, command: 'throw' }); } },
+    { command: ['facepalm'], name: 'facepalm', category: 'reaction', description: 'Send a facepalm reaction GIF', usage: '.facepalm',
+      execute: async (sock, msg, args, extra) => { await fetchReactionImage({ sock, msg, extra, command: 'facepalm' }); } },
+    { command: ['feed'], name: 'feed', category: 'reaction', description: 'Send a feed reaction GIF', usage: '.feed',
+      execute: async (sock, msg, args, extra) => { await fetchReactionImage({ sock, msg, extra, command: 'feed' }); } },
+    { command: ['spank'], name: 'spank', category: 'reaction', description: 'Send a spank reaction GIF', usage: '.spank',
+      execute: async (sock, msg, args, extra) => { await fetchReactionImage({ sock, msg, extra, command: 'spank' }); } },
+    { command: ['handhold', 'holdhands'], name: 'handhold', category: 'reaction', description: 'Send a handhold reaction GIF', usage: '.handhold',
+      execute: async (sock, msg, args, extra) => { await fetchReactionImage({ sock, msg, extra, command: 'handhold' }); } },
+    { command: ['shoot'], name: 'shoot', category: 'reaction', description: 'Send a shoot reaction GIF', usage: '.shoot',
+      execute: async (sock, msg, args, extra) => { await fetchReactionImage({ sock, msg, extra, command: 'shoot' }); } },
+    { command: ['punch'], name: 'punch', category: 'reaction', description: 'Send a punch reaction GIF', usage: '.punch',
+      execute: async (sock, msg, args, extra) => { await fetchReactionImage({ sock, msg, extra, command: 'punch' }); } },
+    { command: ['stare'], name: 'stare', category: 'reaction', description: 'Send a stare reaction GIF', usage: '.stare',
+      execute: async (sock, msg, args, extra) => { await fetchReactionImage({ sock, msg, extra, command: 'stare' }); } },
+    { command: ['comfort'], name: 'comfort', category: 'reaction', description: 'Send a comfort reaction GIF', usage: '.comfort',
+      execute: async (sock, msg, args, extra) => { await fetchReactionImage({ sock, msg, extra, command: 'comfort' }); } },
+    { command: ['boop', 'boopnose'], name: 'boop', category: 'reaction', description: 'Send a boop reaction GIF', usage: '.boop',
+      execute: async (sock, msg, args, extra) => { await fetchReactionImage({ sock, msg, extra, command: 'boop' }); } },
+    { command: ['sleep'], name: 'sleep', category: 'reaction', description: 'Send a sleep reaction GIF', usage: '.sleep',
+      execute: async (sock, msg, args, extra) => { await fetchReactionImage({ sock, msg, extra, command: 'sleep' }); } },
+    { command: ['shrug'], name: 'shrug', category: 'reaction', description: 'Send a shrug reaction GIF', usage: '.shrug',
+      execute: async (sock, msg, args, extra) => { await fetchReactionImage({ sock, msg, extra, command: 'shrug' }); } },
+    { command: ['sip'], name: 'sip', category: 'reaction', description: 'Send a sip reaction GIF', usage: '.sip',
+      execute: async (sock, msg, args, extra) => { await fetchReactionImage({ sock, msg, extra, command: 'sip' }); } },
+    { command: ['clap'], name: 'clap', category: 'reaction', description: 'Send a clap reaction GIF', usage: '.clap',
+      execute: async (sock, msg, args, extra) => { await fetchReactionImage({ sock, msg, extra, command: 'clap' }); } },
+    { command: ['nervous'], name: 'nervous', category: 'reaction', description: 'Send a nervous reaction GIF', usage: '.nervous',
+      execute: async (sock, msg, args, extra) => { await fetchReactionImage({ sock, msg, extra, command: 'nervous' }); } },
+    { command: ['scream'], name: 'scream', category: 'reaction', description: 'Send a scream reaction GIF', usage: '.scream',
+      execute: async (sock, msg, args, extra) => { await fetchReactionImage({ sock, msg, extra, command: 'scream' }); } },
+    { command: ['pout'], name: 'pout', category: 'reaction', description: 'Send a pout reaction GIF', usage: '.pout',
+      execute: async (sock, msg, args, extra) => { await fetchReactionImage({ sock, msg, extra, command: 'pout' }); } },
+    { command: ['bored'], name: 'bored', category: 'reaction', description: 'Send a bored reaction GIF', usage: '.bored',
+      execute: async (sock, msg, args, extra) => { await fetchReactionImage({ sock, msg, extra, command: 'bored' }); } },
+    { command: ['laugh'], name: 'laugh', category: 'reaction', description: 'Send a laugh reaction GIF', usage: '.laugh',
+      execute: async (sock, msg, args, extra) => { await fetchReactionImage({ sock, msg, extra, command: 'laugh' }); } },
+    { command: ['shy'], name: 'shy', category: 'reaction', description: 'Send a shy reaction GIF', usage: '.shy',
+      execute: async (sock, msg, args, extra) => { await fetchReactionImage({ sock, msg, extra, command: 'shy' }); } },
+    { command: ['confused'], name: 'confused', category: 'reaction', description: 'Send a confused reaction GIF', usage: '.confused',
+      execute: async (sock, msg, args, extra) => { await fetchReactionImage({ sock, msg, extra, command: 'confused' }); } },
+    { command: ['angry'], name: 'angry', category: 'reaction', description: 'Send an angry reaction GIF', usage: '.angry',
+      execute: async (sock, msg, args, extra) => { await fetchReactionImage({ sock, msg, extra, command: 'angry' }); } },
+    { command: ['excited'], name: 'excited', category: 'reaction', description: 'Send an excited reaction GIF', usage: '.excited',
+      execute: async (sock, msg, args, extra) => { await fetchReactionImage({ sock, msg, extra, command: 'excited' }); } },
+    { command: ['fear'], name: 'fear', category: 'reaction', description: 'Send a fear reaction GIF', usage: '.fear',
+      execute: async (sock, msg, args, extra) => { await fetchReactionImage({ sock, msg, extra, command: 'fear' }); } },
+    { command: ['surprised'], name: 'surprised', category: 'reaction', description: 'Send a surprised reaction GIF', usage: '.surprised',
+      execute: async (sock, msg, args, extra) => { await fetchReactionImage({ sock, msg, extra, command: 'surprised' }); } },
+    { command: ['thinking'], name: 'thinking', category: 'reaction', description: 'Send a thinking reaction GIF', usage: '.thinking',
+      execute: async (sock, msg, args, extra) => { await fetchReactionImage({ sock, msg, extra, command: 'thinking' }); } },
+    { command: ['embarrassed'], name: 'embarrassed', category: 'reaction', description: 'Send an embarrassed reaction GIF', usage: '.embarrassed',
+      execute: async (sock, msg, args, extra) => { await fetchReactionImage({ sock, msg, extra, command: 'embarrassed' }); } },
+    { command: ['tired'], name: 'tired', category: 'reaction', description: 'Send a tired reaction GIF', usage: '.tired',
+      execute: async (sock, msg, args, extra) => { await fetchReactionImage({ sock, msg, extra, command: 'tired' }); } },
+    { command: ['sad'], name: 'sad', category: 'reaction', description: 'Send a sad reaction GIF', usage: '.sad',
+      execute: async (sock, msg, args, extra) => { await fetchReactionImage({ sock, msg, extra, command: 'sad' }); } },
+    { command: ['love'], name: 'love', category: 'reaction', description: 'Send a love reaction GIF', usage: '.love',
+      execute: async (sock, msg, args, extra) => { await fetchReactionImage({ sock, msg, extra, command: 'love' }); } },
+    { command: ['peace'], name: 'peace', category: 'reaction', description: 'Send a peace reaction GIF', usage: '.peace',
+      execute: async (sock, msg, args, extra) => { await fetchReactionImage({ sock, msg, extra, command: 'peace' }); } },
+    { command: ['victory', 'victorysign'], name: 'victory', category: 'reaction', description: 'Send a victory reaction GIF', usage: '.victory',
+      execute: async (sock, msg, args, extra) => { await fetchReactionImage({ sock, msg, extra, command: 'victory' }); } },
+    { command: ['point'], name: 'point', category: 'reaction', description: 'Send a point reaction GIF', usage: '.point',
+      execute: async (sock, msg, args, extra) => { await fetchReactionImage({ sock, msg, extra, command: 'point' }); } }
+];
