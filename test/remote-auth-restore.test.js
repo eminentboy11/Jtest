@@ -11,15 +11,18 @@ try { require.resolve('sql.js'); } catch (_) {
   try { require.resolve('better-sqlite3'); } catch (_) { dependenciesAvailable = false; }
 }
 
-function fakeAdapter({ source, snapshot = null, configured = true }) {
+function fakeAdapter({ source, snapshot = null, configured = true, mirrorAuthState = null, close = null }) {
   return {
     async init() { return this.getStatus(); },
     getStatus() { return { configured, available: true, botId: 'test' }; },
     async fetchAuthState() {
       return snapshot ? { source, snapshot, updatedAt: snapshot.createdAt || Date.now() } : null;
     },
+    async mirrorAuthState(value) {
+      return mirrorAuthState ? mirrorAuthState(value) : { acknowledged: true };
+    },
     async restoreIntoSQLite() { return { restored: 0 }; },
-    async close() {},
+    async close() { if (close) await close(); },
     getBotId() { return 'test'; },
   };
 }
@@ -56,6 +59,74 @@ test('MongoDB-backed auth snapshot restores into a fresh per-session SQLite data
       db._db.prepare("SELECT value FROM session_auth_meta WHERE key = 'status'").get().value,
       'verified'
     );
+  } finally {
+    await db.shutdownDatabase();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('auth mirror and shutdown wait for the real MongoDB write acknowledgement', { skip: !dependenciesAvailable }, async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'june-auth-flush-'));
+  const database = require('../database');
+  let mirrorFinished = false;
+  let closedAfterMirror = false;
+  const mongo = fakeAdapter({
+    source: 'mongo',
+    snapshot: validSnapshot(),
+    mirrorAuthState: async () => {
+      await new Promise(resolve => setTimeout(resolve, 60));
+      mirrorFinished = true;
+      return { acknowledged: true };
+    },
+    close: async () => { closedAfterMirror = mirrorFinished; },
+  });
+  const db = database.createBotDatabase({
+    botId: 'awaited-mirror-test',
+    dbFile: path.join(dir, 'session.db'),
+    pg: fakeAdapter({ source: 'postgres', snapshot: null, configured: false }),
+    mongo,
+  });
+
+  try {
+    await db.ready;
+    assert.equal((await db.restoreRemoteAuthState()).restored, true);
+    mirrorFinished = false;
+    const pending = db.mirrorRemoteAuthState('test-delayed-write');
+    await new Promise(resolve => setTimeout(resolve, 10));
+    assert.equal(mirrorFinished, false);
+    const result = await pending;
+    assert.equal(mirrorFinished, true);
+    assert.equal(result.ok, true);
+    assert.deepEqual(result.succeeded, ['mongo']);
+
+    mirrorFinished = false;
+    await db.shutdownDatabase();
+    assert.equal(mirrorFinished, true);
+    assert.equal(closedAfterMirror, true);
+  } finally {
+    await db.shutdownDatabase();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('failed auth mirror is reported and queued instead of falsely marked successful', { skip: !dependenciesAvailable }, async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'june-auth-failure-'));
+  const database = require('../database');
+  const db = database.createBotDatabase({
+    botId: 'failed-mirror-test',
+    dbFile: path.join(dir, 'session.db'),
+    pg: fakeAdapter({ source: 'postgres', snapshot: null, configured: false }),
+    mongo: fakeAdapter({ source: 'mongo', snapshot: validSnapshot(), mirrorAuthState: async () => null }),
+  });
+
+  try {
+    await db.ready;
+    assert.equal((await db.restoreRemoteAuthState()).restored, true);
+    const result = await db.mirrorRemoteAuthState('test-failure');
+    assert.equal(result.ok, false);
+    assert.equal(result.error, 'all-configured-auth-mirrors-failed');
+    assert.equal(result.failed[0].adapter, 'mongo');
+    assert.ok(db.getRemoteSyncQueueStats().pending >= 1);
   } finally {
     await db.shutdownDatabase();
     fs.rmSync(dir, { recursive: true, force: true });

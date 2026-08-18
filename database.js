@@ -310,6 +310,29 @@ function createBotDatabase(options = {}) {
       });
   }
 
+  async function invokeRemoteAwaited(adapterName, adapter, method, args) {
+    const status = adapter?.getStatus?.() || {};
+    if (!status.configured) return { adapter: adapterName, configured: false, ok: false, skipped: 'not-configured' };
+    if (!status.available || typeof adapter?.[method] !== 'function') {
+      enqueueRemoteSync(adapterName, method, args, 'adapter-unavailable');
+      return { adapter: adapterName, configured: true, ok: false, error: 'adapter-unavailable' };
+    }
+
+    try {
+      const result = await adapter[method](...args);
+      if (result === null || result === false) throw new Error('remote-operation-failed');
+      try {
+        const dedupeKey = remoteDedupeKey(adapterName, method, args);
+        db.prepare('DELETE FROM remote_sync_queue WHERE dedupe_key = ?').run(dedupeKey);
+      } catch (_) {}
+      return { adapter: adapterName, configured: true, ok: true };
+    } catch (error) {
+      const message = error?.message || 'remote-operation-error';
+      enqueueRemoteSync(adapterName, method, args, message);
+      return { adapter: adapterName, configured: true, ok: false, error: message };
+    }
+  }
+
   function mirrorRemote(method, ...args) {
     invokeRemote('postgres', pg, method, args);
     invokeRemote('mongo', mongo, method, args);
@@ -489,15 +512,29 @@ function createBotDatabase(options = {}) {
           return lastAuthMirror;
         }
 
-        mirrorRemote('mirrorAuthState', snapshot);
+        // Auth durability is different from ordinary best-effort mirrors: wait
+        // for the actual remote writes. Shutdown must not close adapter clients
+        // until at least one configured backend has acknowledged the snapshot.
+        const results = await Promise.all([
+          invokeRemoteAwaited('postgres', pg, 'mirrorAuthState', [snapshot]),
+          invokeRemoteAwaited('mongo', mongo, 'mirrorAuthState', [snapshot]),
+        ]);
+        const configured = results.filter(result => result.configured);
+        const succeeded = configured.filter(result => result.ok);
         lastAuthMirror = {
-          ok: true,
+          ok: succeeded.length > 0,
           reason,
           timestamp: Date.now(),
           credentialRows: snapshot.sessionCreds.length,
           keyRows: snapshot.sessionKeys.length,
           metaRows: snapshot.sessionAuthMeta.length,
+          succeeded: succeeded.map(result => result.adapter),
+          failed: configured.filter(result => !result.ok).map(result => ({
+            adapter: result.adapter,
+            error: result.error,
+          })),
         };
+        if (succeeded.length === 0) lastAuthMirror.error = 'all-configured-auth-mirrors-failed';
         return lastAuthMirror;
       } catch (error) {
         lastAuthMirror = { ok: false, reason, error: error.code || 'mirror-failed', timestamp: Date.now() };

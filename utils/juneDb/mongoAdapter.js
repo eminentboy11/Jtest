@@ -10,11 +10,6 @@
  */
 
 let MongoClient = null;
-let client = null;
-let mongoDb = null;
-let ready = false;
-let initializing = null;
-let lastError = null;
 
 const COLLECTION = 'june_mirror_records';
 
@@ -34,6 +29,14 @@ function createAdapter(botId) {
     process.env.OWNER_NUMBER ||
     'june-x-main'
   );
+
+  // Connection lifecycle is strictly per adapter/bot. A hot-remove or shutdown
+  // of one session must never close another session's MongoDB client.
+  let client = null;
+  let mongoDb = null;
+  let ready = false;
+  let initializing = null;
+  let lastError = null;
 
   function getUri() {
     return String(process.env.MONGODB_URI || process.env.MONGO_URL || '').trim();
