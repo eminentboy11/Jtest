@@ -1,6 +1,6 @@
 {
     "name": "june-x-platform",
-    "version": "1.1.0-beta.2",
+    "version": "1.1.0-beta.",
     "description": "June X Platform — centralized WhatsApp bot pairing gateway: visitors pair their own June X bot via QR or pairing code, developers manage everything from the /dev control room",
     "main": "index.js",
     "type": "commonjs",
