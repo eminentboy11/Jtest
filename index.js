@@ -146,16 +146,35 @@ async function bootBot(botId, opts = {}) {
         }
 
         if (connection === 'close') {
-            const code = lastDisconnect?.error?.output?.statusCode;
+            const statusCode = lastDisconnect?.error?.output?.statusCode;
             const reason = lastDisconnect?.error?.message || 'unknown';
-            console.log(`[ ${bot.id} ] ❌ Closed (${code}) ${reason}`);
+            const isPairingPhase = bot.mode === 'code' && bot.state !== 'connected' && (bot.pairing?.active || !bot.connectedAt);
+            console.log(`[ ${bot.id} ] ❌ Closed (${statusCode}) ${reason} | pairingPhase=${isPairingPhase}`);
 
-            if (code === DisconnectReason.loggedOut) {
+            if (statusCode === DisconnectReason.loggedOut) {
                 bot.state = 'needs-login';
                 bot.lastError = 'Logged out — pair again via web at /';
-                // keep auth dir but mark needs-login; user must re-pair via web
                 if (bot.slotId) slots.markFailed(bot.slotId, 'logged-out');
-            } else if (code === 408) {
+            } else if (statusCode === 401 && isPairingPhase) {
+                // 401 during pairing = code not entered / expired / rate limited — keep waiting, allow retry
+                bot.state = 'waiting';
+                bot.lastError = `Pairing 401: ${reason} — request new code at /`;
+                console.log(`[ ${bot.id} ] ⚠️ 401 during pairing — keeping slot alive for retry`);
+                if (bot.slotId) {
+                    const s = slots.get(bot.slotId);
+                    if (s && s.status === 'waiting') {
+                        // don't fail slot, keep it waiting
+                    }
+                }
+                // auto retry boot after 5s to allow new code request
+                setTimeout(() => bootBot(bot.id, { force: true }).catch(() => {}), 5000);
+            } else if (statusCode === 503 && isPairingPhase) {
+                // 503 Stream Errored — Baileys version or network hiccup, retry quickly
+                bot.state = 'connecting';
+                bot.lastError = `Stream 503: ${reason} — retrying...`;
+                console.log(`[ ${bot.id} ] ⚠️ 503 during pairing — retrying in 3s`);
+                setTimeout(() => bootBot(bot.id, { force: true }).catch(() => {}), 3000);
+            } else if (statusCode === 408) {
                 bot.state = 'connecting';
                 setTimeout(() => bootBot(bot.id, { force: true }).catch(() => {}), 3000);
             } else {
@@ -174,31 +193,60 @@ async function bootBot(botId, opts = {}) {
 
     // If code mode and phone present, request pairing code after socket ready
     if (bot.mode === 'code' && bot.phone) {
-        // wait a bit for socket to be ready
-        setTimeout(async () => {
+        const attemptPairing = async (retries = 0) => {
             try {
                 if (!bot.sock || bot.state === 'connected') return;
+                if (bot.pairing.exhausted) {
+                    console.log(`[ ${bot.id} ] Pairing exhausted (3 attempts)`);
+                    if (bot.slotId) slots.markFailed(bot.slotId, 'Pairing limit reached — create new slot');
+                    return;
+                }
                 if (!bot.pairing.active) {
                     bot.pairing.active = true;
                     bot.pairing.gen += 1;
                     bot.pairing.attempts = 0;
                 }
-                if (bot.pairing.exhausted) return;
+                // Ensure socket is still open
+                if (bot.sock?.ws?.readyState !== 1 && bot.sock?.ws?.readyState !== undefined) {
+                    console.log(`[ ${bot.id} ] Socket not ready for pairing, retrying...`);
+                    if (retries < 3) setTimeout(() => attemptPairing(retries+1), 2000);
+                    return;
+                }
                 const gen = bot.pairing.gen;
-                const code = await sock.requestPairingCode(bot.phone);
-                if (bot.pairing.gen !== gen) return; // stale
+                // Clean phone: ensure no + and no leading 0 after country code already present
+                const cleanPhone = String(bot.phone).replace(/\D/g, '');
+                console.log(`[ ${bot.id} ] Requesting pairing code for ${cleanPhone} (attempt ${bot.pairing.attempts+1}/3)`);
+                const code = await sock.requestPairingCode(cleanPhone);
+                if (bot.pairing.gen !== gen) {
+                    console.log(`[ ${bot.id} ] Stale pairing gen, ignoring code`);
+                    return;
+                }
                 bot.pairing.lastCode = code;
                 bot.pairing.attempts += 1;
                 if (bot.pairing.attempts >= 3) bot.pairing.exhausted = true;
-                console.log(`[ ${bot.id} ] 🔑 Pairing code: ${code} for ${bot.phone}`);
+                console.log(`[ ${bot.id} ] 🔑 Pairing code: ${code} for ${cleanPhone} — enter in WhatsApp: Linked Devices > Link with phone number`);
                 platformBridge.emitPairingCode(bot, code, { attempt: bot.pairing.attempts, gen });
                 if (bot.slotId) slots.updateCode(bot.slotId, code);
             } catch (e) {
-                console.log(`[ ${bot.id} ] Pairing code failed: ${e.message}`);
+                console.log(`[ ${bot.id} ] Pairing code failed: ${e.message} | stack: ${e.stack?.slice(0,200)}`);
                 bot.lastError = e.message;
-                if (bot.slotId) slots.markFailed(bot.slotId, e.message);
+                // Don't fail slot on first failure, allow retry
+                if (retries < 2) {
+                    console.log(`[ ${bot.id} ] Retrying pairing code in 3s...`);
+                    setTimeout(() => attemptPairing(retries+1), 3000);
+                } else {
+                    if (bot.slotId) {
+                        const s = slots.get(bot.slotId);
+                        if (s && s.status === 'waiting') {
+                            // keep waiting, don't mark failed yet unless exhausted
+                            s.error = e.message;
+                        }
+                    }
+                }
             }
-        }, 1500);
+        };
+        // Wait longer for socket to stabilize (Baileys needs ~2-3s)
+        setTimeout(() => attemptPairing(0), 3500);
     }
 
     return bot;
