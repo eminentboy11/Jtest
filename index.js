@@ -129,6 +129,10 @@ async function bootBot(botId, opts = {}) {
             console.log(`[ ${bot.id} ] Pairing already requested, skipping duplicate`);
             return;
         }
+        if (bot.pairing.lastCode) {
+            console.log(`[ ${bot.id} ] Code already exists (${bot.pairing.lastCode}), skipping auto-request — use Get another code button for new code`);
+            return;
+        }
         if (!bot.phone || bot.mode !== 'code') return;
         if (bot.state === 'connected') return;
         if (bot.pairing.exhausted) {
@@ -177,14 +181,14 @@ async function bootBot(botId, opts = {}) {
 
         platformBridge.emitConnUpdate(bot, update, sock);
 
-        // wdp-style: when QR arrives and phone is set, intercept and request pairing code
+        // wdp-style: when QR arrives and phone is set, intercept and request pairing code — ONCE only
         if (qr) {
             try {
                 const dataUrl = await qrcode.toDataURL(qr);
                 slots.updateQr(bot.slotId, dataUrl);
             } catch (_) {}
-            // If code mode, request pairing code on QR (like wdp does)
-            if (bot.mode === 'code' && bot.phone && !bot.pairing._requested) {
+            // If code mode, request pairing code on QR (like wdp does) — only if no code yet
+            if (bot.mode === 'code' && bot.phone && !bot.pairing._requested && !bot.pairing.lastCode) {
                 await attemptPairingCode();
             }
         }
