@@ -1,7 +1,7 @@
 /**
  * JTEST WEB LITE — Fully web-based, no JUNE_SESSIONS, no JUNE_PLATFORM toggle, no dev dashboard.
- * Pairing logic taken from velvet-sparrow-sessions/routes/pair.js (your main session server)
- * - File auth, 100+ bots, no double code bug
+ * Pairing logic from velvet-sparrow-sessions/routes/pair.js
+ * Mini handler: local commands/ + remote URL commands (data/remote-commands.json or REMOTE_COMMANDS_URL)
  */
 'use strict';
 
@@ -19,8 +19,8 @@ const { attachPlatform } = require('./platform');
 const registry = require('./platform/registry');
 const sessionService = require('./platform/sessionService');
 const slots = require('./platform/slots');
+const handlerLite = require('./utils/handlerLite');
 
-// Pterodactyl / Courtney auto-detect
 const RAW_PORT = process.env.SERVER_PORT || process.env.PTERODACTYL_PORT || process.env.PORT || '3000';
 const PORT = Number(RAW_PORT) || 3000;
 const DETECTED_ENV = {
@@ -39,7 +39,6 @@ fs.mkdirSync(AUTH_ROOT, { recursive: true });
 
 const logger = pino({ level: 'fatal' }).child({ level: 'fatal' });
 
-// ── Bot registry (lite) ────────────────────────────────────────────────────────
 const bots = new Map();
 
 function botStatus(bot) {
@@ -64,38 +63,9 @@ async function loadAuth(botId) {
 }
 
 async function handleMessage(bot, sock, msg) {
-    try {
-        const m = msg.message;
-        if (!m) return;
-        // Support conversation, extendedText, image caption, video caption
-        const text = (m.conversation || m.extendedTextMessage?.text || m.imageMessage?.caption || m.videoMessage?.caption || '').trim();
-        if (!text) return;
-        const lower = text.toLowerCase();
-        const jid = msg.key.remoteJid;
-        const isFromMe = !!msg.key.fromMe;
-        // For lite, allow .ping from anyone including self (Message yourself) — old code blocked fromMe
-        // Also log for debugging
-        if (lower === '.ping' || lower === 'ping' || lower === '.alive' || lower.startsWith('.ping ')) {
-            console.log(`[ ${bot.id} ] CMD ping from ${jid} fromMe=${isFromMe} text=${text.slice(0,30)}`);
-            await sock.sendMessage(jid, { text: `🔸 pong! ${bot.id} • lite • ${new Date().toLocaleTimeString()} • uptime ${Math.floor(process.uptime())}s` });
-        } else if (lower.startsWith('.') || lower.startsWith('!')) {
-            // Minimal help for any other command in lite
-            console.log(`[ ${bot.id} ] Unknown cmd ${text.slice(0,20)} from ${jid}`);
-            if (lower === '.help' || lower === '.menu') {
-                await sock.sendMessage(jid, { text: `JTEST WEB LITE — ${bot.id}
-• .ping → pong
-• .help → this
-• Connected as ${bot.accountNumber}
-• Mode: velvet-sparrow pairing
-• RAM ~15-25MB per bot` });
-            }
-        }
-    } catch (e) {
-        console.log(`[ ${bot.id} ] handleMessage error: ${e.message}`);
-    }
+    return handlerLite.handleMessage(sock, msg, { bot });
 }
 
-// ── Socket boot — velvet-sparrow style ───────────────────────────────────────
 async function bootBot(botId, opts = {}) {
     const bot = bots.get(String(botId));
     if (!bot) throw new Error(`Unknown bot ${botId}`);
@@ -107,17 +77,14 @@ async function bootBot(botId, opts = {}) {
     bot.pairingDone = false;
 
     if (!bot.pairing) bot.pairing = { active: false, attempts: 0, exhausted: false, phone: bot.phone || '', lastCode: null, gen: 0, _requested: false };
+    if (!bot.pairing._requested) bot.pairing._requested = false;
 
     const { state, saveCreds } = await loadAuth(bot.id);
     const { version } = await fetchLatestBaileysVersion().catch(() => ({ version: [2, 3000, 1015901307] }));
 
-    // velvet-sparrow uses Browsers.macOS("Safari") — most trusted by WhatsApp
     const sock = makeWASocket({
         version,
-        auth: {
-            creds: state.creds,
-            keys: makeCacheableSignalKeyStore(state.keys, logger),
-        },
+        auth: { creds: state.creds, keys: makeCacheableSignalKeyStore(state.keys, logger) },
         printQRInTerminal: false,
         logger,
         browser: Browsers.macOS("Safari"),
@@ -133,8 +100,54 @@ async function bootBot(botId, opts = {}) {
     bot.sock = sock;
     bot.auth = { state, saveCreds };
 
-    // Attach ALL listeners FIRST — velvet-sparrow style (avoids missing close events)
     sock.ev.on('creds.update', saveCreds);
+
+    const attemptPairingCode = async () => {
+        if (bot.pairing._requested) {
+            console.log(`[ ${bot.id} ] Pairing already requested, skipping duplicate`);
+            return;
+        }
+        if (bot.pairing.lastCode) {
+            console.log(`[ ${bot.id} ] Code already exists (${bot.pairing.lastCode}), skipping auto — use Get another code button`);
+            return;
+        }
+        if (!bot.phone || bot.mode !== 'code') return;
+        if (bot.state === 'connected') return;
+        if (bot.pairing.exhausted) {
+            console.log(`[ ${bot.id} ] Pairing exhausted (3/3) — create new slot`);
+            if (bot.slotId) try { slots.setFailed(bot.id, 'Pairing limit reached — create new slot'); } catch (_) {}
+            return;
+        }
+        bot.pairing._requested = true;
+        try {
+            if (!bot.pairing.active) {
+                bot.pairing.active = true;
+                bot.pairing.gen += 1;
+            }
+            const cleanPhone = String(bot.phone).replace(/\D/g, '');
+            console.log(`[ ${bot.id} ] Waiting 3s for socket to stabilize before pairing...`);
+            await delay(3000);
+            if (bot.state === 'connected') {
+                console.log(`[ ${bot.id} ] Already connected, skipping pairing code`);
+                return;
+            }
+            console.log(`[ ${bot.id} ] Requesting pairing code for ${cleanPhone} (attempt ${bot.pairing.attempts+1}/3)`);
+            const rawCode = await sock.requestPairingCode(cleanPhone);
+            const formatted = rawCode?.length === 8 ? `${rawCode.slice(0,4)}-${rawCode.slice(4)}` : rawCode;
+            bot.pairing.lastCode = rawCode;
+            bot.pairing.attempts += 1;
+            if (bot.pairing.attempts >= 3) bot.pairing.exhausted = true;
+            console.log(`[ ${bot.id} ] 🔑 Pairing code: ${rawCode} (formatted: ${formatted}) for ${cleanPhone}`);
+            platformBridge.emitPairingCode(bot, rawCode, { attempt: bot.pairing.attempts, gen: bot.pairing.gen, formatted });
+            try { slots.setCode(bot.id, rawCode, bot.pairing.attempts, 3); } catch (_) {}
+            bot._lastQrDataUrl = null;
+        } catch (e) {
+            console.log(`[ ${bot.id} ] Pairing code failed: ${e.message}`);
+            bot.lastError = e.message;
+            bot.pairing._requested = false;
+            if (bot.slotId) try { slots.setFailed(bot.id, e.message); } catch (_) {}
+        }
+    };
 
     sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect, qr } = update;
@@ -149,6 +162,9 @@ async function bootBot(botId, opts = {}) {
                 bot._lastQrDataUrl = dataUrl;
                 slots.setQR(bot.id, dataUrl);
             } catch (_) {}
+            if (bot.mode === 'code' && bot.phone && !bot.pairing._requested && !bot.pairing.lastCode) {
+                await attemptPairingCode();
+            }
         }
 
         if (connection === 'open') {
@@ -167,12 +183,10 @@ async function bootBot(botId, opts = {}) {
                 const s = slots.get(bot.slotId);
                 if (s) slots.markPaired(s.slotId, bot.accountNumber);
             }
-            // Startup message — like wdp welcome (lite version)
             try {
                 const selfJid = sock.user?.id ? sock.user.id.split(':')[0] + '@s.whatsapp.net' : null;
                 if (selfJid) {
-                    await sock.sendMessage(selfJid, { text: `✅ JTEST WEB LITE Connected\n\n• Bot: ${bot.id}\n• Number: +${bot.accountNumber}\n• Mode: velvet-sparrow\n• RAM: ~15-25MB per bot\n• Uptime: ${Math.floor(process.uptime())}s\n\n• .ping → pong\n• .help → menu\n\nPaired via ${'apps.courtneytech.xyz:'+PORT}/` });
-                    console.log(`[ ${bot.id} ] Startup message sent to ${selfJid}`);
+                    await sock.sendMessage(selfJid, { text: `✅ JTEST WEB LITE Connected\n\n• Bot: ${bot.id}\n• Number: +${bot.accountNumber}\n• Mode: velvet-sparrow\n• Commands: ${handlerLite.getUniqueCommands().size} loaded (local + URL)\n• .ping → pong\n• .help → menu\n\nPaired via :${PORT}/` });
                 }
             } catch (e) {
                 console.log(`[ ${bot.id} ] Startup message failed: ${e.message}`);
@@ -184,7 +198,6 @@ async function bootBot(botId, opts = {}) {
             const reasonLower = String(reason).toLowerCase();
             const isConflict401 = statusCode === 401 && reasonLower.includes('conflict');
 
-            // velvet-sparrow: don't reconnect if pairingDone or 401 or max reconnects
             if (bot.pairingDone || statusCode === 401 || bot.reconnectCount >= 10) {
                 if (statusCode === 401 && !bot.pairingDone) {
                     console.log(`[ ${bot.id} ] 401 not reconnecting (will allow new code via UI)`);
@@ -196,12 +209,11 @@ async function bootBot(botId, opts = {}) {
                     bot.state = 'waiting';
                     bot.lastError = `${reason} — create new slot`;
                     try { slots.setFailed(bot.id, reason); } catch (_) {}
-                if (bot.slotId) slots.markFailed(bot.slotId, reason);
+                    if (bot.slotId) try { slots.markFailed(bot.slotId, reason); } catch (_) {}
                 }
                 return;
             }
 
-            // WhatsApp sends 515 (restart required) after pairing code entry — must reconnect (velvet-sparrow logic)
             bot.reconnectCount++;
             console.log(`[ ${bot.id} ] Reconnect #${bot.reconnectCount} in 5s (status ${statusCode}) ${reason} — 515 restart expected after code entry`);
             bot.state = 'connecting';
@@ -212,58 +224,22 @@ async function bootBot(botId, opts = {}) {
 
     sock.ev.on('messages.upsert', async ({ messages }) => {
         for (const msg of messages) {
-            // Lite: process ALL messages including fromMe (Message yourself) for .ping
-            // Old code had if (msg.key.fromMe) continue which broke self-ping
             await handleMessage(bot, sock, msg);
         }
     });
 
-    // Request pairing code AFTER listeners are attached — velvet-sparrow style
-    // Only if not already registered
-    if (!state.creds.registered) {
-        if (bot.mode === 'code' && bot.phone) {
-            if (bot.pairing._requested) {
-                console.log(`[ ${bot.id} ] Pairing already requested, skipping`);
-            } else if (bot.pairing.lastCode) {
-                console.log(`[ ${bot.id} ] Code already exists ${bot.pairing.lastCode}, skipping auto — use Get another code button`);
-            } else {
-                bot.pairing._requested = true;
-                bot.pairing.active = true;
-                bot.pairing.gen += 1;
-                await delay(2000); // brief wait for WS to establish (velvet-sparrow)
-                const cleanPhone = String(bot.phone).replace(/\D/g, '');
-                console.log(`[ ${bot.id} ] Requesting pairing code for ${cleanPhone} (attempt ${bot.pairing.attempts+1}/3)`);
-                try {
-                    const rawCode = await sock.requestPairingCode(cleanPhone);
-                    const formatted = rawCode?.length === 8 ? `${rawCode.slice(0,4)}-${rawCode.slice(4)}` : rawCode;
-                    bot.pairing.lastCode = rawCode;
-                    bot.pairing.attempts += 1;
-                    if (bot.pairing.attempts >= 3) bot.pairing.exhausted = true;
-                    console.log(`[ ${bot.id} ] 🔑 Pairing code: ${rawCode} (formatted: ${formatted}) for ${cleanPhone}`);
-                    platformBridge.emitPairingCode(bot, rawCode, { attempt: bot.pairing.attempts, gen: bot.pairing.gen, formatted });
-                    try { slots.setCode(bot.id, rawCode, bot.pairing.attempts, 3); } catch (_) {}
-                    if (bot.slotId) slots.updateCode(bot.slotId, rawCode);
-                    // KEEP requested=true to prevent double — only explicit button resets it
-                } catch (e) {
-                    console.log(`[ ${bot.id} ] Pairing code failed: ${e.message}`);
-                    bot.lastError = e.message;
-                    bot.pairing._requested = false;
-                    try { slots.setFailed(bot.id, e.message); } catch (_) {}
-                    if (bot.slotId) {
-                        const s = slots.get(bot.slotId);
-                        if (s) s.error = e.message;
-                    }
-                }
+    if (bot.mode === 'code' && bot.phone) {
+        setTimeout(() => {
+            if (bot.state !== 'connected' && !bot.pairing._requested && !bot.pairing.lastCode) {
+                console.log(`[ ${bot.id} ] QR not received, fallback requesting pairing code...`);
+                attemptPairingCode();
             }
-        }
-    } else {
-        console.log(`[ ${bot.id} ] Creds already registered — awaiting open`);
+        }, 6000);
     }
 
     return bot;
 }
 
-// ── SessionService adapter ───────────────────────────────────────────────────
 sessionService.configure({
     async provision(entry, { source, mode }) {
         const isQr = mode === 'qr' || entry.qrLogin;
@@ -359,6 +335,12 @@ sessionService.configure({
 const sessionsBridge = require('./platform/sessions');
 sessionsBridge.wireBridge();
 
+let handlerReady = false;
+handlerLite.init().then(() => {
+    handlerReady = true;
+    console.log('[ HANDLER ] Mini handler ready — local + URL commands');
+}).catch(e => console.log('[ HANDLER ] Init failed:', e.message));
+
 const app = express();
 const server = http.createServer(app);
 
@@ -387,7 +369,7 @@ attachPlatform(app, server).then(async () => {
         console.log(`[ STATUS ] Simple status → :${PORT}/status`);
         console.log(`[ COURTNEY ] Pterodactyl detected — open your allocation IP:PORT from Network tab`);
         console.log(`[ COURTNEY ] Your public URL is apps.courtneytech.xyz:${PORT} — try / and /status`);
-        console.log(`[ BOTS ] ${bots.size}/${MAX_BOTS} active | Mode: velvet-sparrow pairing logic, no double codes`);
+        console.log(`[ BOTS ] ${bots.size}/${MAX_BOTS} active | Mini handler: local + URL commands`);
         console.log(`[ RAM ] ~15-25MB per bot (file auth, no store) → 100 bots ≈ 1.5-2.5GB`);
         console.log('='.repeat(60) + '\n');
     });
@@ -395,11 +377,12 @@ attachPlatform(app, server).then(async () => {
 
 app.get('/health', (_, res) => res.status(200).send('OK'));
 app.get('/health/details', (_, res) => {
-    res.json({ ok: true, lite: true, pairing: 'velvet-sparrow', bots: [...bots.values()].map(botStatus), maxBots: MAX_BOTS, uptime: process.uptime(), memory: process.memoryUsage() });
+    res.json({ ok: true, lite: true, pairing: 'velvet-sparrow', handler: handlerReady ? 'ready' : 'loading', commands: [...handlerLite.getUniqueCommands().keys()], bots: [...bots.values()].map(botStatus), maxBots: MAX_BOTS, uptime: process.uptime(), memory: process.memoryUsage() });
 });
 app.get('/status', (_, res) => {
     const list = [...bots.values()].map(b => `<li>${b.id} — ${b.state} — ${b.accountNumber || b.phone || 'no phone'}</li>`).join('');
-    res.send(`<html><head><title>JTEST Lite</title></head><body style="font-family:monospace;background:#03060c;color:#e2f0ff;padding:2rem"><h1>JTEST WEB LITE — velvet-sparrow pairing</h1><p>${bots.size}/${MAX_BOTS} bots</p><ul>${list || '<li>no bots — pair at /</li>'}</ul><p><a href="/" style="color:#00ffe0">Go to pairing gateway /</a></p></body></html>`);
+    const cmds = [...handlerLite.getUniqueCommands().keys()].join(', ') || 'loading...';
+    res.send(`<html><head><title>JTEST Lite</title></head><body style="font-family:monospace;background:#03060c;color:#e2f0ff;padding:2rem"><h1>JTEST WEB LITE — velvet-sparrow + mini handler</h1><p>${bots.size}/${MAX_BOTS} bots | Commands: ${cmds}</p><ul>${list || '<li>no bots — pair at /</li>'}</ul><p><a href="/" style="color:#00ffe0">Go to pairing gateway /</a></p></body></html>`);
 });
 
 async function shutdown() {
