@@ -1,154 +1,124 @@
-# June X Web — Independent Dashboard Edition
+# JTEST WEB LITE — 100+ Bots Capable
 
-> **⚠️ INDEPENDENT PROJECT NOTICE:** This web version is a **completely different project entirely** — it has **nothing to do with June X family, including any external session server**. All session handling is **self-contained, local, and independent**. No external minting server, no June X family dependency, no `burning-lorena-...koyeb.app` or `JUNE-X~` server flow.
+> **Fully web-based, no trash env.** No `JUNE_SESSIONS`, no `JUNE_PLATFORM=true`, no dev dashboard, no external session server. Just `npm start` and pair at `/`.
 
-A web-managed, multi-session WhatsApp bot platform built on Baileys — fully independent and self-contained.
+## Why Lite?
 
-- Public visitors provision a bot through QR or pairing code at `/` (local, no external server).
-- Developers manage the fleet through the password-protected `/dev` control room.
-- Multi-session engine handles sockets, authentication, databases, pairing and reconciliation locally.
-- WhatsApp fleet-management commands are not part of this edition — web control only.
-- **No June X family, no session server** — everything is local.
+Previous edition was **9MB + 700 deps (48 packages, ffmpeg, sharp, jimp, ytdl, scrapers, pdfkit, etc)** + 309 commands loaded in memory + SQLite per bot + message store + group caches = **80-150MB RAM per bot** → 30 bots = 4.5GB.
 
-## Architecture (Independent)
+**Lite is:**
+- **7 deps only**: `baileys, express, qrcode, dotenv, pino, ws, awesome-phonenumber`
+- No `better-sqlite3`, no `ffmpeg-static` (186MB), no `sharp`, no `jimp`, no scrapers, no `moment`, no `mongodb/pg`, no `sql.js`
+- **File auth** `auth/<botId>/creds.json` — no SQLite per bot
+- **No message store**, no group metadata cache, no anti-delete queues, no auto-react, no command loader (only ping)
+- **No dev dashboard** (`/dev` removed), no `logStore`, no MongoDB registry
+- **No JUNE_SESSIONS env** — sessions only via web UI at `/`, persisted in `data/platform-registry.json`
+- **No JUNE_PLATFORM toggle** — always web
 
-```text
-Public pairing gateway          Developer control room
-/                               /dev
-        │                            │
-        └──────── sessionService ────┘
-                         │
-                  SessionManager (independent)
-                         │
-       ┌─────────────────┼─────────────────┐
-       │                 │                 │
-   Baileys socket    SQLite/auth      PG/Mongo mirror (optional)
-   (local)           (local)          (local mirror)
-```
+**Result:** ~15-25MB per bot → **100 bots ≈ 1.5-2.5GB RAM** (vs 8-15GB before). Fits in 25% of an 8GB VPS (2GB).
 
-`platform/sessionService.js` is the platform's only lifecycle interface. It
-supports QR/code provisioning, stop, reconnect, permanent deletion, status and
-reconciliation — all **self-contained, no external server**. Public routes, `/dev`, and GC do not manipulate legacy WhatsApp
-management commands or raw SessionManager boot internals.
-
-## Independence Statement
-
-This project is **fully independent**:
-- ❌ No June X family dependency
-- ❌ No external session server (`sessionServer.js` removed)
-- ❌ No `JUNE-X~` handles minted by external server
-- ✅ Self-contained session handling: `JTEST~<base64>` / `WEB-X~<base64>` / `BASE64~<base64>` or raw base64, all local
-- ✅ QR and pairing-code provisioning via web gateway at `/` (local)
-- ✅ All auth stored locally in `sessions/<id>/` and SQLite `database/june-<id>.db`
-- ✅ Optional PostgreSQL/MongoDB mirrors are also local mirrors, not external session server
-
-It is a **completely different project** built for web-managed multi-session WhatsApp bots, using latest June X commands/utils but with independent infrastructure.
-
-## Features (Independent)
-
-- QR and phone-number pairing-code provisioning (local, no external server)
-- Three-code pairing budget with stale-socket and concurrency protection
-- Multiple independent sessions per process
-- Up to four linked sessions for the same WhatsApp number
-- Per-session SQLite auth, settings and runtime state (local)
-- Optional PostgreSQL and MongoDB mirrors (local mirrors)
-- Public slot isolation over WebSocket and polling
-- Pairing-slot cancellation and failed-provisioning rollback
-- Developer session list, stop, reconnect, permanent delete and GC
-- Live developer logs
-- Per-IP creation limits and one shared platform capacity
-- Developer login throttling and expiring bearer tokens
-- WebSocket connection limits and unauthenticated timeouts
-- Automatic cleanup of abandoned web pairing sessions
-- **No external session server, no June X family**
-
-## Requirements
-
-- Node.js 20.9+ recommended (minimum declared runtime remains Node.js 18)
-- npm
-- FFmpeg for media commands (auto-provisioned if missing)
-- Optional PostgreSQL and/or MongoDB for durable remote persistence (local mirrors)
-
-## Installation (Independent)
+## Quick Start (VPS)
 
 ```bash
-git clone https://github.com/eminentboy11/Jtest.git
-cd Jtest
-npm install
-cp .env.example .env
+git clone https://github.com/eminentboy11/Jtest && cd Jtest
+npm install --no-audit
+echo "PORT=3000
+PLATFORM_MAX_BOTS=100
+PLATFORM_SLOT_TTL_MIN=15
+PLATFORM_CREATES_PER_HOUR=10" > .env
+node index.js
+# open http://YOUR_IP:3000/
 ```
 
-Set at minimum:
-
-```env
-JUNE_PLATFORM=true
-JUNE_SESSIONS=[]
-ADMIN_PASSWORD=use-a-long-unique-password
-```
-
-Then start:
-
+PM2:
 ```bash
-npm start
+npm i -g pm2
+pm2 start index.js --name jtest-lite -- --max-old-space-size=3072
+pm2 save && pm2 startup
 ```
 
-Open:
-
-```text
-http://localhost:5000/       Public pairing gateway (independent, no external server)
-http://localhost:5000/dev    Developer control room
-http://localhost:5000/status Engine status dashboard
-http://localhost:5000/health Health check
+Docker:
+```dockerfile
+FROM node:20-slim
+WORKDIR /app
+COPY package.json ./
+RUN npm install --no-audit --omit=dev
+COPY . .
+EXPOSE 3000
+CMD ["node","index.js"]
 ```
 
-## Public API (Independent)
+## How It Works
 
-| Method | Route | Purpose |
-|---|---|---|
-| `GET` | `/` | Pairing page (independent, local QR/code) |
-| `POST` | `/api/slots` | Create a QR/code pairing slot (local) |
-| `GET` | `/api/slots/:slotId` | Poll slot status |
-| `POST` | `/api/slots/:slotId/code` | Request another pairing code |
-| `DELETE` | `/api/slots/:slotId` | Cancel and clean up an unpaired slot |
+1. User visits `/` → `pair.html`
+2. Chooses QR or pairing code + phone
+3. `POST /api/slots` → creates slot + provisions bot via `sessionService.provision`
+4. WebSocket watches slot: `{"type":"watch_slot","slotId":"..."}`
+5. Bot boots with file auth `auth/<botId>/`, QR rendered via `qrcode`, code via `sock.requestPairingCode`
+6. On `open`, registry marks paired, slot → `paired`
+7. GC sweeps expired slots every 60s
 
-Slot IDs are random bearer capabilities. Pairing API responses are marked
-`Cache-Control: no-store`. No external server involved.
+Sessions persist in `data/platform-registry.json` + `auth/`. No env editing.
 
-## Developer API
+## APIs (Lite)
 
-| Method | Route | Purpose |
-|---|---|---|
-| `POST` | `/dev/api/login` | Developer login |
-| `GET` | `/dev/api/sessions` | List sessions |
-| `POST` | `/dev/api/sessions/:id/stop` | Stop a session |
-| `POST` | `/dev/api/sessions/:id/reconnect` | Reconnect a session |
-| `DELETE` | `/dev/api/sessions/:id` | Permanently delete a session |
-| `POST` | `/dev/api/gc` | GC expired slots |
+**Public (no auth):**
+- `GET /` → pairing UI
+- `POST /api/slots` → `{mode:'qr'|'code', phoneNumber?}`
+- `GET /api/slots/:slotId` → status
+- `DELETE /api/slots/:slotId` → cancel
+- `POST /api/slots/:slotId/code` → another code
 
-## Session Format (Independent)
+**System:**
+- `GET /health` → OK
+- `GET /health/details` → `{bots, maxBots, memory}`
+- `GET /status` → simple HTML list
 
-This edition uses **independent local formats**, no external server:
+**WebSocket:**
+- `ws://host/` → send `{"type":"watch_slot","slotId":"..."}`
+- Receives `{type:"slot", slot:{qr, codes, status}}`
 
-- `JTEST~<base64>` — independent, `creds.json` base64, local
-- `WEB-X~<base64>` — same, web edition prefix
-- `BASE64~<base64>` — generic base64
-- Raw base64 (legacy compat)
-- Only `JTEST~`, `WEB-X~`, `BASE64~`, or raw base64 accepted — no June X family legacy
+No `/dev/*` — dev dashboard removed completely.
 
-All are **self-contained** — no fetch from `burning-lorena-...koyeb.app`, no `JUNE-X~` server flow.
+## What Consumes RAM / Space? (Old vs Lite)
 
-## Multi-Session
+**Heavy in old:**
+1. `ffmpeg-static` ~186MB binary + `fluent-ffmpeg` + `sharp` ~50MB + `jimp` ~30MB — sticker/video conversion, loaded even if unused
+2. `better-sqlite3` native per bot (5-10MB handle) + `sql.js` WASM + per-bot DB file
+3. `Baileys` message store `Map<JID, Map<msgId, msg>>` grows unbounded, group metadata cache, presence store
+4. 309 commands `require()` at boot — each file closure, many require `axios, cheerio, moment, pdfkit, mammoth` etc
+5. `@bochilteam/scraper`, `ruhend-scraper`, `yt-search`, `ytdl-core`, `g-i-s`, `wa-sticker-formatter`, `webp-converter`, `node-webpmux` — media downloaders
+6. `mongodb`, `pg` drivers + platform registry dual backend
+7. `logStore` keeps 200+ logs in memory + dev WS broadcasts
+8. `moment-timezone` ~2MB locales, `pdfkit`, `docx`, `mammoth`, `pdf-parse`
+9. Anti-delete + group stats + auto-react caches per bot
+10. `.env` watcher + hot-reload + `JUNE_SESSIONS` JSON parsing every 15s
 
-See `MULTI_SESSION.md` for full guide — all independent, no external server.
+**Lite removes all above.** Only `baileys` + `express` + `qrcode` remain. Per-bot RAM ~15-25MB.
 
-## Tests
+## Scaling to 100+ Bots
 
-```bash
-npm test
-```
+- Set `PLATFORM_MAX_BOTS=100` (or 200)
+- Use `auth/` on fast disk (SSD)
+- Disable heavy commands (already done)
+- Monitor `GET /health/details` → `memory.heapUsed`
+- If heap > 80% of VPS, lower cap or add another instance with shared `data/` via NFS or use PM2 cluster
 
-49 tests, all independent, no external server dependency.
+Example: 4GB VPS → 100 bots ≈ 2GB (50%) → fits in 25% of 8GB VPS (2GB). For true 25% of 4GB (1GB), host ~40-50 bots per instance.
 
-## License
+## Env Vars (Lite)
 
-MIT — Independent project, no June X family.
+No `JUNE_SESSIONS`, no `JUNE_PLATFORM`, no `ADMIN_PASSWORD`, no `SESSION_ID`, no `MONGODB_URI`.
+
+Only:
+- `PORT` (default 3000)
+- `PLATFORM_MAX_BOTS` (default 100)
+- `PLATFORM_SLOT_TTL_MIN` (default 15)
+- `PLATFORM_CREATES_PER_HOUR` (default 10)
+- `PLATFORM_MAX_WS_CONNECTIONS` (200)
+- `PLATFORM_MAX_WS_PER_IP` (20)
+- `LOG_LEVEL` (silent/info)
+
+Fully web-based edition — nothing like switching mode through env.
+
+## License MIT
