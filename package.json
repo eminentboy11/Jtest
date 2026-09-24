@@ -1,22 +1,24 @@
 {
-    "name": "June-X Ultra",
+    "name": "june-x-web-independent",
     "version": "3.0.0",
-    "description": "WhatsApp MD-Style Multi-Command Bot by Supreme",
+    "description": "June X Web \u2014 Independent Dashboard Edition: self-contained multi-session WhatsApp bot platform (no June X family, no external session server)",
     "main": "index.js",
     "type": "commonjs",
     "scripts": {
         "start": "node index.js",
-     "build": "node obfuscator.js",
+        "build": "node obfuscator.js",
         "test": "node --test test/",
         "dev": "nodemon index.js",
         "install:no-puppeteer": "PUPPETEER_SKIP_DOWNLOAD=true PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true npm install"
     },
     "keywords": [
-        "whatsapp bot",
-        "June-Ultra",
-        "bot",
+        "whatsapp",
         "baileys",
-        "library"
+        "bot",
+        "dashboard",
+        "multi-session",
+        "independent",
+        "web"
     ],
     "author": "Agent of Dusk",
     "license": "MIT",
