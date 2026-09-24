@@ -67,14 +67,32 @@ async function handleMessage(bot, sock, msg) {
     try {
         const m = msg.message;
         if (!m) return;
-        const text = (m.conversation || m.extendedTextMessage?.text || '').trim();
+        // Support conversation, extendedText, image caption, video caption
+        const text = (m.conversation || m.extendedTextMessage?.text || m.imageMessage?.caption || m.videoMessage?.caption || '').trim();
         if (!text) return;
         const lower = text.toLowerCase();
-        if (lower === '.ping' || lower === 'ping' || lower === '.alive') {
-            const jid = msg.key.remoteJid;
-            await sock.sendMessage(jid, { text: `🔸 pong! ${bot.id} • lite • ${new Date().toLocaleTimeString()}` });
+        const jid = msg.key.remoteJid;
+        const isFromMe = !!msg.key.fromMe;
+        // For lite, allow .ping from anyone including self (Message yourself) — old code blocked fromMe
+        // Also log for debugging
+        if (lower === '.ping' || lower === 'ping' || lower === '.alive' || lower.startsWith('.ping ')) {
+            console.log(`[ ${bot.id} ] CMD ping from ${jid} fromMe=${isFromMe} text=${text.slice(0,30)}`);
+            await sock.sendMessage(jid, { text: `🔸 pong! ${bot.id} • lite • ${new Date().toLocaleTimeString()} • uptime ${Math.floor(process.uptime())}s` });
+        } else if (lower.startsWith('.') || lower.startsWith('!')) {
+            // Minimal help for any other command in lite
+            console.log(`[ ${bot.id} ] Unknown cmd ${text.slice(0,20)} from ${jid}`);
+            if (lower === '.help' || lower === '.menu') {
+                await sock.sendMessage(jid, { text: `JTEST WEB LITE — ${bot.id}
+• .ping → pong
+• .help → this
+• Connected as ${bot.accountNumber}
+• Mode: velvet-sparrow pairing
+• RAM ~15-25MB per bot` });
+            }
         }
-    } catch (_) {}
+    } catch (e) {
+        console.log(`[ ${bot.id} ] handleMessage error: ${e.message}`);
+    }
 }
 
 // ── Socket boot — velvet-sparrow style ───────────────────────────────────────
@@ -144,11 +162,20 @@ async function bootBot(botId, opts = {}) {
             bot.pairing._requested = false;
             console.log(`[ ${bot.id} ] ✅ Connected as ${bot.accountNumber || sock.user?.id}`);
             await registry.markPaired(bot.id, bot.accountNumber).catch(() => {});
-            // mark paired via botId (slotId may be null, use setPaired by botId)
             try { slots.setPaired(bot.id, bot.accountNumber); } catch (_) {}
             if (bot.slotId) {
                 const s = slots.get(bot.slotId);
                 if (s) slots.markPaired(s.slotId, bot.accountNumber);
+            }
+            // Startup message — like wdp welcome (lite version)
+            try {
+                const selfJid = sock.user?.id ? sock.user.id.split(':')[0] + '@s.whatsapp.net' : null;
+                if (selfJid) {
+                    await sock.sendMessage(selfJid, { text: `✅ JTEST WEB LITE Connected\n\n• Bot: ${bot.id}\n• Number: +${bot.accountNumber}\n• Mode: velvet-sparrow\n• RAM: ~15-25MB per bot\n• Uptime: ${Math.floor(process.uptime())}s\n\n• .ping → pong\n• .help → menu\n\nPaired via ${'apps.courtneytech.xyz:'+PORT}/` });
+                    console.log(`[ ${bot.id} ] Startup message sent to ${selfJid}`);
+                }
+            } catch (e) {
+                console.log(`[ ${bot.id} ] Startup message failed: ${e.message}`);
             }
         }
 
@@ -185,7 +212,8 @@ async function bootBot(botId, opts = {}) {
 
     sock.ev.on('messages.upsert', async ({ messages }) => {
         for (const msg of messages) {
-            if (msg.key.fromMe) continue;
+            // Lite: process ALL messages including fromMe (Message yourself) for .ping
+            // Old code had if (msg.key.fromMe) continue which broke self-ping
             await handleMessage(bot, sock, msg);
         }
     });
