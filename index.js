@@ -336,10 +336,15 @@ const sessionsBridge = require('./platform/sessions');
 sessionsBridge.wireBridge();
 
 let handlerReady = false;
-handlerLite.init().then(() => {
-    handlerReady = true;
-    console.log('[ HANDLER ] Mini handler ready — local + URL commands');
-}).catch(e => console.log('[ HANDLER ] Init failed:', e.message));
+// Init handler BEFORE express so commands ready — await sync
+(async () => {
+    try {
+        await handlerLite.init();
+        handlerReady = true;
+    } catch (e) {
+        console.log('[ HANDLER ] Init failed:', e.message);
+    }
+})();
 
 const app = express();
 const server = http.createServer(app);
@@ -369,7 +374,7 @@ attachPlatform(app, server).then(async () => {
         console.log(`[ STATUS ] Simple status → :${PORT}/status`);
         console.log(`[ COURTNEY ] Pterodactyl detected — open your allocation IP:PORT from Network tab`);
         console.log(`[ COURTNEY ] Your public URL is apps.courtneytech.xyz:${PORT} — try / and /status`);
-        console.log(`[ BOTS ] ${bots.size}/${MAX_BOTS} active | Mini handler: local + URL commands`);
+        console.log(`[ BOTS ] ${bots.size}/${MAX_BOTS} active | Mini handler: ${[...handlerLite.getUniqueCommands().keys()].join(', ') || 'loading...'} | local + URL`);
         console.log(`[ RAM ] ~15-25MB per bot (file auth, no store) → 100 bots ≈ 1.5-2.5GB`);
         console.log('='.repeat(60) + '\n');
     });
