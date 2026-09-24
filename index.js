@@ -14,14 +14,14 @@
  *   - commands/config/database reads are routed per bot through
  *     utils/botContext AsyncLocalStorage — command modules are untouched.
  *
- * Sessions are defined via the JUNE_SESSIONS env / .env variable — the sole
+ * Sessions are defined via the JUNE_SESSIONS env (independent, no external server) / .env variable — the sole
  * session registry (JSON array or { "sessions": [...] }). Its .env line
  * hot-reloads: edits are reconciled live (hot-add / hot-remove) without a
  * restart. With no registry, a single default session runs the first-run
  * login flow.
  *
  * Entry shape: { "id": "main", "name": "June Main", "phone": "2547…",
- *                "sessionId": "JUNE-X~ab12cd" }
+ *                "sessionId": "JTEST~<base64>" }
  */
 require('./utils/shutdown').enforceShutdownChain();
 
@@ -222,7 +222,6 @@ const {
     clearSQLiteAuth,
     invalidateSQLiteAuth,
 } = require('./utils/juneDb/auth-state')
-const sessionServer = require('./utils/juneDb/sessionServer')
 const { wrapSockSanitized } = require('./utils/sanitizeUserText')
 
 process.env.PUPPETEER_SKIP_DOWNLOAD = 'true'
@@ -504,14 +503,14 @@ if (!fs.existsSync(envPath)) {
         '# ── SESSIONS (JUNE_SESSIONS is the only session config) ────',
         '#',
         '# One session:',
-        '#    JUNE_SESSIONS=[{"sessionId":"JUNE-X~ab12cd","phone":"2348..."}]',
+        '#    JUNE_SESSIONS=[{"sessionId":"JTEST~<base64>","phone":"2348..."}]',
         '#',
         '# Multiple sessions (one process, isolated per bot):',
-        '#    JUNE_SESSIONS=[{"sessionId":"JUNE-X~ab12cd","phone":"2348..."},{"sessionId":"","phone":"2348..."}]',
+        '#    JUNE_SESSIONS=[{"sessionId":"JTEST~<base64>","phone":"2348..."},{"sessionId":"","phone":"2348..."}]',
         '#',
         '# MUST be one line of JSON (multi-line values do not parse in .env).',
         '#',
-        '#    sessionId  JUNE-X~ + 4-20 alphanum (get at /pair) — auto-login + recovery backup',
+        '#    sessionId  JTEST~<base64> or WEB-X~<base64> or raw base64 — independent local, no external server',
         '#    phone      digits with country code -> pairing-code login +',
         '#               auto-fallback whenever the sessionId fails (the bot\'s key)',
         '#    id / name  optional overrides — otherwise id is derived from the',
@@ -1075,43 +1074,30 @@ function quarantineCurrentSessionForReplacement(bot) {
 }
 
 // ─── Session Format Validator ─────────────────────────────────────────────────
-// Only accepted format: JUNE-X~ + 4-20 letters/digits. Legacy prefixes were retired.
+// Independent Web Edition — no external session server, no June X family dependency.
+// Supported formats (all local, base64-encoded creds.json):
+//   JTEST~<base64> | WEB-X~<base64> | BASE64~<base64> | <raw base64> (legacy compat)
+// No legacy June X family formats — truly independent.
 
-const SESSION_ID_PATTERN = /^JUNE-X~[A-Za-z0-9]{4,20}$/i
-const LEGACY_SESSION_PREFIXES = ['JUNE-MD:~', 'Ultra-X:~', 'June-Ultra:~', 'June::~', 'ultra-x:~', 'June-X:~', 'june-ultra:~', 'JUNE-ULTRA:~']
+const SESSION_ID_PATTERN = /^(?:JTEST~|WEB-X~|BASE64~)?[A-Za-z0-9+/=]+$/i
+// VALID_PREFIXES is imported from sessionManager (independent)
+const LEGACY_PREFIXES = []
 
 function validateSessionIdFormat(sessionId) {
     const value = String(sessionId || '').trim()
     if (!value) return true // absence is fine — handled by the login flow
-    return SESSION_ID_PATTERN.test(value)
+    // Accept any of our independent prefixes + base64, or raw base64
+    if (VALID_PREFIXES.some(p => value.startsWith(p))) return true
+    // Raw base64 (at least 20 chars, base64 charset)
+    return /^[A-Za-z0-9+/=]{20,}$/.test(value)
 }
 
 async function checkAndHandleSessionFormat(bot) {
     const sessionId = String(bot.sessionId || '').trim()
     if (!sessionId) return true
-    if (LEGACY_SESSION_PREFIXES.some(p => sessionId.startsWith(p))) {
-        log(chalk.black.bgRedBright(`[ERROR:${bot.id}] The raw-session SESSION_ID format was RETIRED.`), 'white')
-        log(chalk.white.bgRedBright('Your SESSION_ID is an old Ultra-X:~/JUNE-MD:~/June-Ultra:~ base64 string.'), 'white')
-        log(chalk.white.bgRedBright('These no longer work. Migrate now:'), 'white')
-        log(chalk.white.bgRedBright(`  1. Pair at ${sessionServer.getServerUrl()}/pair`), 'white')
-        log(chalk.white.bgRedBright('  2. Set SESSION_ID to your new JUNE-X~ Session ID'), 'white')
-        log(chalk.white.bgRedBright('  3. Restart the bot.'), 'white')
-        const isSoloLegacySession = sessionManager.list().length === 1 && bot.id === DEFAULT_BOT_ID
-        if (isSoloLegacySession) {
-            log(chalk.black.bgYellowBright('Please fix the sessionId in your session registry and restart. Exiting in 20 seconds...'), 'white')
-            await delay(20000)
-            process.exit(1)
-        }
-        log(`[ SESSION:${bot.id} ] Skipping this session; fix its sessionId in the JUNE_SESSIONS registry (.env).`, 'red', true)
-        bot.botState = 'needs-login'
-        bot.lastError = 'Retired sessionId format'
-        return false
-    }
     if (!validateSessionIdFormat(sessionId)) {
-        const problem = sessionServer.describeHandleProblem(sessionId)
-        log(chalk.black.bgYellowBright(`[ERROR:${bot.id}] Invalid Session ID (${problem}).`), 'white')
-        log(chalk.black.bgYellowBright('[SESSION ID] Must be a JUNE-X~ Session ID (e.g. JUNE-X~ab12cd).'), 'white')
-        log(chalk.black.bgYellowBright(`Get one at ${sessionServer.getServerUrl()}/pair — then restart.`), 'white')
+        log(chalk.black.bgYellowBright(`[ERROR:${bot.id}] Invalid sessionId format.`), 'white')
+        log(chalk.black.bgYellowBright('[SESSION ID] Must be JTEST~<base64> or WEB-X~<base64> or raw base64. Pair via web gateway at /'), 'white')
         const isSoloLegacySession = sessionManager.list().length === 1 && bot.id === DEFAULT_BOT_ID
         if (isSoloLegacySession) {
             log(chalk.black.bgYellowBright('Please fix the sessionId in your session registry and restart. Exiting in 20 seconds...'), 'white')
@@ -1126,50 +1112,6 @@ async function checkAndHandleSessionFormat(bot) {
     return true
 }
 
-// Per-bot Session Server fetch (JUNE-X~ handle -> SQLite)
-async function fetchAndRestoreForBot(bot, handle) {
-    const serverUrl = sessionServer.getServerUrl()
-    let response
-    try {
-        response = await fetch(`${serverUrl}/session/${encodeURIComponent(handle)}`, {
-            headers: { Accept: 'text/plain' },
-            signal: AbortSignal.timeout(20000)
-        })
-    } catch (cause) {
-        throw new Error(`Session Server unreachable: ${cause.message}`)
-    }
-    const text = (await response.text()).trim()
-    if (!response.ok) {
-        const err = new Error('This Session ID is unknown or was revoked')
-        err.terminal = true
-        err.code = 'session_revoked'
-        err.status = response.status
-        throw err
-    }
-    let blob = text
-    const tilde = blob.indexOf('~')
-    if (tilde >= 0) blob = blob.slice(tilde + 1)
-    let creds
-    try {
-        const zlib = require('zlib')
-        creds = JSON.parse(zlib.gunzipSync(Buffer.from(blob, 'base64')).toString('utf8'))
-    } catch (_) {
-        const err = new Error('Session Server returned an invalid session blob')
-        err.terminal = true
-        err.code = 'session_state_missing'
-        throw err
-    }
-    const snapshot = sessionServer.filesToSnapshot({ 'creds.json': creds })
-    if (!snapshot) {
-        const err = new Error('Session Server returned an invalid session blob')
-        err.terminal = true
-        err.code = 'session_state_missing'
-        throw err
-    }
-    const restored = sessionServer.restoreSnapshotIntoSQLite(bot.db._db, snapshot)
-    return restored
-}
-
 
 // ─── Download Session from sessionId ─────────────────────────────────────────
 
@@ -1179,29 +1121,30 @@ async function downloadSessionData(bot) {
     if (!bot.sessionId) return
     const sid = String(bot.sessionId).trim()
     if (!sid) return
-    if (sessionServer.isJuneHandle(sid)) {
-        // JUNE-X~ handle -> fetch and restore into SQLite (not file)
-        log(`[ SESSION SERVER:${bot.id} ] Fetching session from server...`, 'cyan')
-        try {
-            const result = await fetchAndRestoreForBot(bot, sid)
-            bot.db.markDatabaseDirty('session-server-restore')
-            setAuthSource(bot.db._db, 'session-server')
-            setAuthConnectionVerified(bot.db._db, true)
-            log(`[ SESSION SERVER:${bot.id} ] ✅ Auth restored (${result.keyRows} key rows)`, 'green')
-        } catch (e) {
-            if (e.terminal) {
-                log(`[ SESSION SERVER:${bot.id} ] ❌ ${e.code}: ${e.message}`, 'red', true)
-                throw e
+
+    // Independent Web Edition — local base64 decode, no external server
+    // Supports: JTEST~<b64>, WEB-X~<b64>, BASE64~<b64>, or raw b64 — independent, no June X family
+    try {
+        let b64 = sid
+        for (const prefix of VALID_PREFIXES) {
+            if (b64.startsWith(prefix)) {
+                b64 = b64.slice(prefix.length)
+                break
             }
-            throw e
         }
-        return
+        // If still contains ~ (unknown prefix), strip up to ~
+        if (b64.includes('~') && !b64.startsWith('ey')) {
+            const tilde = b64.indexOf('~')
+            b64 = b64.slice(tilde + 1)
+        }
+        const sessionData = Buffer.from(b64, 'base64')
+        // Validate JSON
+        JSON.parse(sessionData.toString('utf8'))
+        atomicWriteFile(bot.credsPath, sessionData)
+        log(`✅ [${bot.id}] Session saved from sessionId (independent local)`, 'green')
+    } catch (e) {
+        throw new Error(`Invalid sessionId: not valid base64 JSON (${e.message})`)
     }
-    // Legacy format retired
-    if (LEGACY_SESSION_PREFIXES.some(p => sid.startsWith(p))) {
-        throw new Error(`The raw-session SESSION_ID format was RETIRED. Pair at ${sessionServer.getServerUrl()}/pair and use a JUNE-X~ Session ID.`)
-    }
-    throw new Error(`Unknown session format: ${sid.slice(0, 20)}...`)
 }
 
 // ─── Restore Session from Database ────────────────────────────────────────────
@@ -1232,13 +1175,13 @@ const SESSION_ENV_EXPORT_ENABLED = /^(1|true|yes|on)$/i.test(
 )
 
 function buildSessionIdFromCreds(bot) {
-    // Raw-session export was retired. JUNE-X~ handles are minted by the Session Server,
+    // Independent Web Edition — session export is local base64, no external server,
     // not derived from creds.json. This function is kept only for backward compat
     // and will not be used when JUNE_EXPORT_SESSION_TO_ENV is disabled (default).
     const credsJson = fs.readFileSync(bot.credsPath, 'utf8')
     JSON.parse(credsJson) // validate — throws if corrupt
     const base64 = Buffer.from(credsJson, 'utf8').toString('base64')
-    return `JUNE-X~${base64.slice(0, 20)}` // placeholder — not a valid handle, export disabled
+    return `JTEST~${base64}` // independent local base64
 }
 
 // Refreshed sessionIds are written back to the .env file's JUNE_SESSIONS
@@ -1350,11 +1293,11 @@ async function getLoginMethod(bot) {
     if (choice === '1') {
         log(`\nEnter your session ID, if it doesn't work put it in .env file (Get it from repository)`, 'yellow')
         log('Session Formats accepted:', 'yellow')
-        log('JUNE-X~ab12cd (get at /pair)', 'yellow')
+        log('JTEST~<base64> or pair via web at / (independent)', 'yellow')
         let sessionId = await question(chalk.greenBright('\nYour session ID: '))
         sessionId = sessionId.trim()
         if (!VALID_PREFIXES.some(p => sessionId.startsWith(p))) {
-            log("Invalid Session ID! Must be JUNE-X~ + 4-20 alphanum (get at /pair)", 'red')
+            log("Invalid Session ID! Must be JTEST~<base64> or WEB-X~<base64> (independent)", 'red')
             process.exit(1)
         }
 
@@ -1965,7 +1908,7 @@ async function startBotSocket(bot) {
                 // Remember only a hash so an expired sessionId cannot cause an
                 // endless file-download/relogin loop on the next startup.
                 const configuredSessionId = String(bot.sessionId || '').trim()
-                if (configuredSessionId && sessionServer.isJuneHandle(configuredSessionId)) {
+                if (configuredSessionId && validateSessionIdFormat(configuredSessionId)) {
                     markSessionIdFingerprintRevoked(bot, fingerprintSessionId(configuredSessionId))
                 }
                 bot.botState = 'disconnected'
@@ -2633,7 +2576,7 @@ async function bootBot(bot) {
         // fingerprint so we can detect a genuinely changed sessionId safely.
         const envSessionID = String(bot.sessionId || '').trim()
         const hasValidEnvSessionID = Boolean(
-            envSessionID && sessionServer.isJuneHandle(envSessionID)
+            envSessionID && validateSessionIdFormat(envSessionID)
         )
         const sqliteAuthReady = hasVerifiedSQLiteAuth(bot.db._db)
         const currentSessionFingerprint = hasValidEnvSessionID

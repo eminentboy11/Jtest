@@ -1,6 +1,8 @@
-# June X Dashboard Edition — Multi-Session Engine Guide
+# June X Web — Independent Dashboard Edition — Multi-Session Engine Guide
 
-June X now runs **any number of WhatsApp sessions inside one process**. Each
+> **Independent Project Notice:** This web version is a **completely different project entirely** — it has **nothing to do with June X family, including any external session server**. All session handling is self-contained, local, and independent. No external minting server, no June X family dependency.
+
+June X Web now runs **any number of WhatsApp sessions inside one process**. Each
 session is a fully independent bot: its own socket, its own reconnect state
 machine, its own settings, and its own SQLite database.
 
@@ -13,14 +15,17 @@ registry — one line of JSON. One entry behaves exactly like the old
 single-session mode; multiple entries boot independently.
 
 ```env
-# single session
-JUNE_SESSIONS=[{"sessionId":"JUNE-X~ab12cd","phone":"2348154853640"}]
+# single session (independent local base64)
+JUNE_SESSIONS=[{"sessionId":"JTEST~eyJub2lzZUtleSI6...","phone":"2348154853640"}]
 
-# pairing-only
+# pairing-only (no sessionId, fresh QR/code via web at /)
 JUNE_SESSIONS=[{"sessionId":"","phone":"2348154853640"}]
 
-# multiple sessions
-JUNE_SESSIONS=[{"sessionId":"JUNE-X~ab12cd","phone":"2348154853640"},{"sessionId":"","phone":"2348165321909"}]
+# multiple sessions (independent)
+JUNE_SESSIONS=[{"sessionId":"JTEST~eyJub2lzZUtleSI6...","phone":"2348154853640"},{"sessionId":"","phone":"2348165321909"}]
+
+# empty fleet (dashboard mode)
+JUNE_SESSIONS=[]
 ```
 
 Rules:
@@ -42,15 +47,15 @@ Session entry fields:
 
 | Field       | Required  | Meaning                                                        |
 |-------------|-----------|----------------------------------------------------------------|
-| `sessionId` | no        | `JUNE-X~xxxx` (4-20 alphanum, minted at /pair) — auto-login, recovery backup |
+| `sessionId` | no        | Independent local: `JTEST~<base64>` or `WEB-X~<base64>` or `BASE64~<base64>` or raw base64 (creds.json) — auto-login, fully self-contained, no external server |
 | `phone`     | expected  | Digits with country code — pairing-code login + the self-healing fallback; the bot's identity key |
 | `id`        | **auto**  | Derived from the phone; duplicate numbers get `-2`, `-3` suffixes automatically (two sessions may share one number). Optional explicit override for a stable id |
-| `name`      | **auto**  | Derived as `June X <last3>` (e.g. `June X 640`) for dashboard/logs. An explicit name also changes that bot's `botName` |
+| `name`      | **auto**  | Derived as `June X Web <last3>` (e.g. `June X Web 640`) for dashboard/logs. An explicit name also changes that bot's `botName` |
 
 Login combinations:
 
-- Only `phone` → fresh pairing-code login (code in the logs).
-- Only `sessionId` → classic auto-login (no fallback without a phone).
+- Only `phone` → fresh pairing-code login (code in the logs / web at `/`).
+- Only `sessionId` → independent local auto-login (base64 blob, no fallback without a phone).
 - **Both** → sessionId first, phone auto-fallback.
 - **Neither** → parked as `needs-login` until you add one.
 
@@ -62,10 +67,10 @@ works unchanged — `id`/`name` are simply treated as overrides.
 A session may carry **both** fields:
 
 ```json
-{ "sessionId": "JUNE-X~ab12cd", "phone": "2348154853640" }
+{ "sessionId": "JTEST~eyJub2lzZUtleSI6...", "phone": "2348154853640" }
 ```
 
-The bot always tries the `sessionId` first (legacy bootstrap flow). If that
+The bot always tries the `sessionId` first (independent local bootstrap). If that
 path breaks, it **automatically falls back to pairing-code login** with the
 phone — no manual intervention, no `needs-login` parking:
 
@@ -81,11 +86,11 @@ the `sessionId` path produced it — so the combo self-heals end to end.
 
 #### Web platform provisioning and management
 
-Public users provision QR or pairing-code sessions from the web gateway. Fleet
+Public users provision QR or pairing-code sessions from the web gateway at `/`. Fleet
 operations (list, stop, reconnect, permanent delete and GC) are available only
 through the password-protected `/dev` control room. Both surfaces use the same
-internal session service and engine reconciliation pipeline; no WhatsApp fleet-
-management commands are exposed.
+internal session service and engine reconciliation pipeline; no external session
+server is involved — everything is self-contained and independent.
 
 #### Startup report is a single-session feature
 
@@ -131,21 +136,20 @@ restart to apply.
 
 ### 2. Pair / connect
 
-- A `sessionId` session bootstraps itself — same as the original bot.
-- A `phone` session prints a pairing code in the logs:
+- A `sessionId` session bootstraps itself from local base64 — fully independent.
+- A `phone` session prints a pairing code in the logs and web at `/`:
   `🔑 [backup] Your Pairing Code: XXXX-XXXX` — enter it in WhatsApp →
   Settings → Linked Devices → Link a Device.
 - The legacy default session still supports the interactive TTY login menu.
 
-### 3. Web surfaces
+### 3. Web surfaces (independent, self-contained)
 
-- `GET /` — public QR/pairing-code gateway
+- `GET /` — public QR/pairing-code gateway (independent, no external server)
 - `GET /dev` — password-protected developer fleet control room
 - `GET /status` — engine session status page
 - `GET /health` and `GET /health/details` — health/diagnostics
 
-The web platform uses `platform/sessionService.js`; WhatsApp fleet-management
-commands are not exposed.
+The web platform uses `platform/sessionService.js`; no external session server is used.
 
 ## How isolation works
 
@@ -165,8 +169,8 @@ env vars; every bot's rows are then separated by its `bot_id` automatically
 (each session opens its own adapter pool):
 
 ```env
-DATABASE_URL=postgres://user:pass@host:5432/june_x
-MONGODB_URI=mongodb+srv://user:pass@cluster/june_x
+DATABASE_URL=postgres://user:pass@host:5432/june_x_web
+MONGODB_URI=mongodb+srv://user:pass@cluster/june_x_web
 ```
 
 - Startup log per bot: `[ PG ] Connected; remote persistence enabled for bot_id=main`
@@ -234,3 +238,11 @@ bots or the guard is transient:
 - `JUNE_DB_FILE` / `JUNE_DB_DIR` / `JUNE_DB_BACKUP_FILE` still apply to the
   default session; extra sessions always use `database/june-<id>.db`.
 - `global.__JUNE_SHUTDOWN` now stops every session and flushes every database.
+
+## Independence Statement
+
+This project is **fully independent** — it does **not** depend on June X family,
+does **not** use any external session server (like `burning-lorena-...koyeb.app`),
+and does **not** share session infrastructure with June X. All pairing, QR, auth,
+and storage are local and self-contained. It is a completely different project
+built for web-managed multi-session WhatsApp bots.

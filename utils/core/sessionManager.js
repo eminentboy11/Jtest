@@ -14,9 +14,9 @@
  * (interactive login menu, or a clear exit message on headless platforms).
  *
  * Entry shape (simple):
- *   { phone: '2547...', sessionId: 'JUNE-X~ab12cd' }
+ *   { phone: '2547...', sessionId: 'JTEST~eyJub2lzZUtleSI6...' }
  * Entry shape (full, optional overrides):
- *   { id: 'main', name: 'June Main', phone: '2547...', sessionId: 'JUNE-X~ab12cd' }
+ *   { id: 'main', name: 'June Main', phone: '2547...', sessionId: 'JTEST~eyJub2lzZUtleSI6...' }
  *
  * The actual Baileys boot lives in index.js (startBotSocket); the manager
  * receives it via setBootFn so it can be unit-tested without network access.
@@ -403,9 +403,10 @@ const last3Digits = (value) => {
 
 // Supported session-ID formats shared by web provisioning and engine bootstrap
 // so validation stays in one place.
-const VALID_PREFIXES = ['JUNE-X~'];
-const SESSION_ID_PATTERN = /^JUNE-X~[A-Za-z0-9]{4,20}$/i;
-const LEGACY_PREFIXES = ['JUNE-MD:~', 'Ultra-X:~', 'June-Ultra:~', 'June::~', 'ultra-x:~', 'June-X:~', 'june-ultra:~'];
+// Independent Web Edition — no June X family, no external session server
+const VALID_PREFIXES = ['JTEST~', 'WEB-X~', 'BASE64~'];
+const SESSION_ID_PATTERN = /^(?:JTEST~|WEB-X~|BASE64~)?[A-Za-z0-9+/=]+$/i;
+const LEGACY_PREFIXES = [];
 
 const isValidSessionIdFormat = (value) => {
     const sessionId = String(value || '').trim();
@@ -457,7 +458,7 @@ function addSessionEntry(registry, entry = {}) {
  * Normalize raw registry entries into fully-qualified session entries.
  *
  * SIMPLE FORMAT (recommended): just sessionId + phone —
- *   [ { "sessionId": "JUNE-X~ab12cd", "phone": "2348154853640" } ]
+ *   [ { "sessionId": "JTEST~eyJub2lzZUtleSI6...", "phone": "2348154853640" } ]
  *
  *   id    → derived from the phone automatically (duplicate numbers get
  *           -2, -3 … suffixes so two sessions may share one number)
