@@ -128,7 +128,7 @@ async function bootBot(botId, opts = {}) {
         if (qr) {
             try {
                 const dataUrl = await qrcode.toDataURL(qr);
-                slots.updateQr(bot.slotId, dataUrl);
+                slots.setQR(bot.id, dataUrl);
             } catch (_) {}
         }
 
@@ -143,6 +143,8 @@ async function bootBot(botId, opts = {}) {
             bot.pairing._requested = false;
             console.log(`[ ${bot.id} ] ✅ Connected as ${bot.accountNumber || sock.user?.id}`);
             await registry.markPaired(bot.id, bot.accountNumber).catch(() => {});
+            // mark paired via botId (slotId may be null, use setPaired by botId)
+            try { slots.setPaired(bot.id, bot.accountNumber); } catch (_) {}
             if (bot.slotId) {
                 const s = slots.get(bot.slotId);
                 if (s) slots.markPaired(s.slotId, bot.accountNumber);
@@ -165,7 +167,8 @@ async function bootBot(botId, opts = {}) {
                     console.log(`[ ${bot.id} ] Closed (${statusCode}) ${reason} — not reconnecting (done=${bot.pairingDone})`);
                     bot.state = 'waiting';
                     bot.lastError = `${reason} — create new slot`;
-                    if (bot.slotId) slots.markFailed(bot.slotId, reason);
+                    try { slots.setFailed(bot.id, reason); } catch (_) {}
+                if (bot.slotId) slots.markFailed(bot.slotId, reason);
                 }
                 return;
             }
@@ -209,12 +212,14 @@ async function bootBot(botId, opts = {}) {
                     if (bot.pairing.attempts >= 3) bot.pairing.exhausted = true;
                     console.log(`[ ${bot.id} ] 🔑 Pairing code: ${rawCode} (formatted: ${formatted}) for ${cleanPhone}`);
                     platformBridge.emitPairingCode(bot, rawCode, { attempt: bot.pairing.attempts, gen: bot.pairing.gen, formatted });
+                    try { slots.setCode(bot.id, rawCode, bot.pairing.attempts, 3); } catch (_) {}
                     if (bot.slotId) slots.updateCode(bot.slotId, rawCode);
                     // KEEP requested=true to prevent double — only explicit button resets it
                 } catch (e) {
                     console.log(`[ ${bot.id} ] Pairing code failed: ${e.message}`);
                     bot.lastError = e.message;
                     bot.pairing._requested = false;
+                    try { slots.setFailed(bot.id, e.message); } catch (_) {}
                     if (bot.slotId) {
                         const s = slots.get(bot.slotId);
                         if (s) s.error = e.message;

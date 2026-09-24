@@ -30,6 +30,11 @@ async function provisionSlot(slot) {
             {
                 commit: async (created) => {
                     slots.bindBot(slot, created.id);
+                    // Also set bot.slotId for direct slot updates (fixes UI not showing code)
+                    try {
+                        const bot = sessionService.get(created.id);
+                        if (bot) bot.slotId = slot.slotId;
+                    } catch (_) {}
                     await registry.trackSession(created.id, {
                         mode: slot.mode,
                         phone: created.phone || slot.phone || null,
