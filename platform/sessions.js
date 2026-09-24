@@ -33,7 +33,18 @@ async function provisionSlot(slot) {
                     // Also set bot.slotId for direct slot updates (fixes UI not showing code)
                     try {
                         const bot = sessionService.get(created.id);
-                        if (bot) bot.slotId = slot.slotId;
+                        if (bot) {
+                            bot.slotId = slot.slotId;
+                            // If pairing code was already generated inside provision (before bind), push it to slot now
+                            if (bot.pairing?.lastCode) {
+                                console.log(`[ ${bot.id} ] Commit: pushing existing code ${bot.pairing.lastCode} to slot ${slot.slotId.slice(0,6)}`);
+                                slots.setCode(bot.id, bot.pairing.lastCode, bot.pairing.attempts, 3);
+                            }
+                            // If QR was generated before bind, push it too
+                            if (bot._lastQrDataUrl) {
+                                slots.setQR(bot.id, bot._lastQrDataUrl);
+                            }
+                        }
                     } catch (_) {}
                     await registry.trackSession(created.id, {
                         mode: slot.mode,
