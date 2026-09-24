@@ -70,13 +70,19 @@ async function requestAnotherCode(slot) {
     if (bot.pairing?.exhausted) throw new Error('Pairing code limit reached.');
 
     try {
-        const code = await bot.sock.requestPairingCode(bot.phone);
+        // Reset the internal requested flag to allow fresh code (pairing code only, no QR talk)
+        if (bot.pairing) bot.pairing._requested = false;
+        const cleanPhone = String(bot.phone).replace(/\D/g, '');
+        console.log(`[ ${bot.id} ] Explicit retry: requesting new pairing code for ${cleanPhone}`);
+        const code = await bot.sock.requestPairingCode(cleanPhone);
         const attempt = (bot.pairing.attempts || 0) + 1;
         bot.pairing.attempts = attempt;
         bot.pairing.lastCode = code;
+        bot.pairing._requested = true; // keep true to prevent QR double-trigger after explicit retry
         if (attempt >= 3) bot.pairing.exhausted = true;
         slots.setCode(bot.id, code, attempt, 3);
         bridge.emitPairingCode(bot, code, { attempt, limit: 3 });
+        console.log(`[ ${bot.id} ] 🔑 New pairing code: ${code} (attempt ${attempt}/3)`);
         return { ok: true, code };
     } catch (e) {
         throw new Error(e.message);

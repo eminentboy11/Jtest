@@ -121,11 +121,11 @@ async function bootBot(botId, opts = {}) {
 
     sock.ev.on('creds.update', saveCreds);
 
-    // wdp-style: track if pairing code already requested for this connection
-    let _pairingCodeRequested = false;
+    // wdp-style: track if pairing code already requested for this connection (stored on bot to allow explicit retry)
+    if (!bot.pairing._requested) bot.pairing._requested = false;
 
     const attemptPairingCode = async () => {
-        if (_pairingCodeRequested) {
+        if (bot.pairing._requested) {
             console.log(`[ ${bot.id} ] Pairing already requested, skipping duplicate`);
             return;
         }
@@ -136,7 +136,7 @@ async function bootBot(botId, opts = {}) {
             if (bot.slotId) slots.markFailed(bot.slotId, 'Pairing limit reached — create new slot');
             return;
         }
-        _pairingCodeRequested = true;
+        bot.pairing._requested = true;
         try {
             if (!bot.pairing.active) {
                 bot.pairing.active = true;
@@ -159,12 +159,12 @@ async function bootBot(botId, opts = {}) {
             console.log(`[ ${bot.id} ] ⚠️ Enter within 30s — code expires fast. If it says Couldn't link, use QR mode or remove a linked device (max 4)`);
             platformBridge.emitPairingCode(bot, rawCode, { attempt: bot.pairing.attempts, gen: bot.pairing.gen, formatted });
             if (bot.slotId) slots.updateCode(bot.slotId, rawCode);
-            // KEEP _pairingCodeRequested=true to prevent QR from triggering second code and invalidating first
+            // KEEP bot.pairing._requested=true to prevent QR from triggering second code and invalidating first
             // It will be reset only on close or explicit retry button
         } catch (e) {
             console.log(`[ ${bot.id} ] Pairing code failed: ${e.message}`);
             bot.lastError = e.message;
-            _pairingCodeRequested = false; // allow retry on failure
+            bot.pairing._requested = false; // allow retry on failure
             if (bot.slotId) {
                 const s = slots.get(bot.slotId);
                 if (s) s.error = e.message;
@@ -184,7 +184,7 @@ async function bootBot(botId, opts = {}) {
                 slots.updateQr(bot.slotId, dataUrl);
             } catch (_) {}
             // If code mode, request pairing code on QR (like wdp does)
-            if (bot.mode === 'code' && bot.phone && !_pairingCodeRequested) {
+            if (bot.mode === 'code' && bot.phone && !bot.pairing._requested) {
                 await attemptPairingCode();
             }
         }
@@ -196,7 +196,7 @@ async function bootBot(botId, opts = {}) {
             bot.lastError = null;
             bot.pairing.active = false;
             bot.pairing.exhausted = false;
-            _pairingCodeRequested = false;
+            bot.pairing._requested = false;
             console.log(`[ ${bot.id} ] ✅ Connected as ${bot.accountNumber || sock.user?.id}`);
             await registry.markPaired(bot.id, bot.accountNumber).catch(() => {});
             if (bot.slotId) {
@@ -226,19 +226,19 @@ async function bootBot(botId, opts = {}) {
                 bot.state = 'waiting';
                 bot.lastError = `Pairing 401: ${reason} — request new code`;
                 console.log(`[ ${bot.id} ] ⚠️ 401 during pairing — keeping slot alive, request new code via UI`);
-                _pairingCodeRequested = false;
+                bot.pairing._requested = false;
                 setTimeout(() => bootBot(bot.id, { force: true }).catch(() => {}), 5000);
             } else if (statusCode === 503 && isPairingPhase) {
                 bot.state = 'connecting';
                 bot.lastError = `Stream 503: ${reason} — retrying...`;
                 console.log(`[ ${bot.id} ] ⚠️ 503 during pairing — retrying in 3s`);
-                _pairingCodeRequested = false;
+                bot.pairing._requested = false;
                 setTimeout(() => bootBot(bot.id, { force: true }).catch(() => {}), 3000);
             } else if (statusCode === 408) {
                 // QR refs attempts ended — wdp-style, this happens when QR expires without pairing
                 console.log(`[ ${bot.id} ] ⚠️ 408 QR refs ended — will re-request pairing on next QR`);
                 bot.state = 'connecting';
-                _pairingCodeRequested = false;
+                bot.pairing._requested = false;
                 setTimeout(() => bootBot(bot.id, { force: true }).catch(() => {}), 2000);
             } else {
                 bot.state = 'connecting';
