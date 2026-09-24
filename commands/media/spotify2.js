@@ -8,7 +8,7 @@ const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
 const { sendButtons } = require('gifted-btns');
-const config = require('../../config');
+const database = require('../../database');
 
 const RETRY_DELAY = 3000;
 const MAX_RESULTS = 5;
@@ -82,7 +82,7 @@ async function downloadSpotify(spotifyUrl) {
 }
 
 function getTrackButtons(tracks, dateNow) {
-    const prefix = config.prefix || '.';
+    const prefix = database.getBotSetting('prefix') || '.';
     return tracks.map((track, i) => ({
         id:   `${prefix}sptrack_${i}_${dateNow}`,
         text: `${i + 1}. ${track.title.substring(0, 22)}${track.title.length > 22 ? '…' : ''}`,
@@ -90,7 +90,7 @@ function getTrackButtons(tracks, dateNow) {
 }
 
 function getFormatButtons(dateNow) {
-    const prefix = config.prefix || '.';
+    const prefix = database.getBotSetting('prefix') || '.';
     return [
         { id: `${prefix}spfmt_audio_${dateNow}`,    text: '🎶 Audio' },
         { id: `${prefix}spfmt_audiodoc_${dateNow}`, text: '📄 Audio Document' },
@@ -132,7 +132,7 @@ module.exports = {
         }
 
         const from           = extra.from;
-        const prefix         = config.prefix || '.';
+        const prefix         = database.getBotSetting('prefix') || '.';
         const originalSender = msg.key.participant || msg.key.remoteJid;
 
         await sock.sendMessage(from, { react: { text: '🔍', key: msg.key } });
@@ -160,7 +160,7 @@ module.exports = {
                 `*Query:* _${query}_\n\n` +
                 `${trackList}\n\n` +
                 `*Select a track to download:*`,
-            footer:  `Made by ${config.botName}`,
+            footer:  `Made by ${database.getBotSetting('botName')}`,
             buttons: getTrackButtons(tracks, dateNow),
         }, { quoted: msg });
 
@@ -200,7 +200,7 @@ module.exports = {
                     `⿻ *Released:* ${track.release_date || 'N/A'}\n` +
                     `⿻ *Link:*     ${track.url}\n\n` +
                     `*Select download format:*`,
-                footer:  `Made by ${config.botName}`,
+                footer:  `Made by ${database.getBotSetting('botName')}`,
                 buttons: getFormatButtons(fmtDateNow),
             }, { quoted: messageData });
 
@@ -266,7 +266,7 @@ module.exports = {
                             document: { url: filePath },
                             mimetype: 'audio/mpeg',
                             fileName: `${cleanTitle}.mp3`,
-                            caption:  `> ${config.botName}`,
+                            caption:  `> ${database.getBotSetting('botName')}`,
                         }, { quoted: fmtMsg });
                     }
 

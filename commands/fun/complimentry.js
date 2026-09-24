@@ -4,7 +4,7 @@
 
 module.exports = {
     name: 'compliment',
-    aliases: ['praise', 'compliment'],
+    aliases: ['praise'],
     category: 'fun',
     desc: 'Get a random compliment',
     usage: 'compliment [@user]',

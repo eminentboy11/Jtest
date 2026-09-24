@@ -5,7 +5,7 @@
 
 module.exports = {
     name: 'q',
-    aliases: ['quote', 'quotedinfo'],
+    aliases: ['quotedinfo'],
     category: 'tools',
     description: 'Get detailed information about a quoted message',
     usage: '.q (reply to any message)',

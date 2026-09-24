@@ -1,7 +1,6 @@
 /**
  * Set Prefix — persists via database/bot-settings.json
  */
-const config = require('../../config');
 const db = require('../../database');
 
 module.exports = {
@@ -15,11 +14,11 @@ module.exports = {
   async execute(sock, msg, args, extra) {
     try {
       if (args.length === 0) {
-        const current = config.prefix || '(none)';
+        const current = db.getBotSetting('prefix') || '(none)';
         return extra.reply(
           `📌 Current prefix: ${current}\n\n` +
-          `Usage: ${config.prefix || ''}setprefix <new prefix>\n` +
-          `Use *${config.prefix || ''}setprefix none* to remove the prefix.`
+          `Usage: ${db.getBotSetting('prefix') || ''}setprefix <new prefix>\n` +
+          `Use *${db.getBotSetting('prefix') || ''}setprefix none* to remove the prefix.`
         );
       }
 
@@ -32,7 +31,7 @@ module.exports = {
 
       // Persist to database and update runtime config
       db.setBotSetting('prefix', newPrefix);
-      config.prefix = newPrefix;
+      db.setBotSetting('prefix', newPrefix);
 
       if (newPrefix === '') {
         await extra.reply(`✅ Prefix removed! Commands now work without a prefix.\n\nExample: menu, ping, help`);

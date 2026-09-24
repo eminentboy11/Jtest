@@ -34,32 +34,47 @@ module.exports = {
       const argSet = new Set((args || []).map((a) => String(a).toLowerCase()));
       const confirmed = argSet.has('confirm');
       const includeSession = argSet.has('--session') || argSet.has('--full') || argSet.has('-s');
+      // Owner identity survives a reset unless explicitly included, the same
+      // way the login session does. Losing control of your own bot should
+      // never be a side effect of clearing data.
+      const includeOwner = argSet.has('--owner') || argSet.has('--full');
 
       if (!confirmed) {
         return extra.reply(
           '⚠️ *DATABASE RESET — CONFIRMATION REQUIRED*\n\n' +
           'This permanently wipes the bot’s stored data:\n' +
           '• ' + DATA_SCOPE.join('\n• ') + '\n\n' +
-          'The WhatsApp login session is kept by default.\n' +
-          'Add *--session* to also clear the login (bot must re-pair).\n\n' +
+          'Kept by default:\n' +
+          '• WhatsApp login session\n' +
+          '• Owner number and name\n\n' +
+          'Add *--session* to also clear the login (bot must re-pair).\n' +
+          'Add *--owner* to also clear the owner.\n' +
+          '_(--full does both)_\n\n' +
           'To proceed, send: *.resetbot confirm*' +
-          (includeSession ? ' *--session*' : '') + '\n\n' +
+          (includeSession ? ' *--session*' : '') +
+          (includeOwner ? ' *--owner*' : '') + '\n\n' +
           '🔒 Owner only.'
         );
       }
 
       await extra.reply('🧹 Wiping database, please wait…');
 
-      const result = await database.resetDatabase({ includeSession });
+      const result = await database.resetDatabase({ includeSession, includeOwner });
 
       const lines = [
         '✅ *Database reset complete*\n',
         '🗄️ *Local tables cleared:* ' + (result.localCleared ? result.localCleared.length : 0),
         '☁️ *Remote mirror cleared:* ' + (result.remote && result.remote.remoteCleared ? 'yes' : 'no / not configured'),
       ];
+      lines.push('');
+      lines.push(result.ownerPreserved
+        ? '👑 *Owner kept* — ' + (database.getOwners()[0] || 'none')
+        : '👑 *Owner cleared* — the paired account is re-claimed on the next connect.');
+
       if (includeSession) {
         lines.push('');
-        lines.push('🔑 *Login session cleared* — the bot returns to the pairing screen on next reconnect/restart.');
+        lines.push('🔑 *Login session cleared locally.*');
+        lines.push('☁️ Note: SESSION_ID is still set, so the bot will re-fetch this session from the Session Server on next start. To fully switch accounts, clear SESSION_ID in .env first and re-pair.');
       } else {
         lines.push('');
         lines.push('🔑 Login session kept — bot stays connected.');

@@ -1,5 +1,4 @@
 const database = require('../../database');
-const config = require('../../config');
 const { resolvePhone } = require('../../utils/jidHelper');
 
 async function resolveToPhone(sock, jid) {
@@ -45,9 +44,9 @@ module.exports = {
         if (!targetJid) {
             return reply(
                 `âŒ *Usage:*\n` +
-                `  ${config.prefix}removesudo @user\n` +
-                `  ${config.prefix}removesudo 254712345678\n` +
-                `  ${config.prefix}removesudo all ” remove every sudo user`
+                `  ${database.getBotSetting('prefix')}removesudo @user\n` +
+                `  ${database.getBotSetting('prefix')}removesudo 254712345678\n` +
+                `  ${database.getBotSetting('prefix')}removesudo all ” remove every sudo user`
             );
         }
 
@@ -55,7 +54,7 @@ module.exports = {
 
         if (!number) {
             const rawLid = targetJid.split('@')[0].split(':')[0];
-            return reply(` Could not resolve LID @${rawLid} to a phone number.\n\nTry using the phone number directly:\n${config.prefix}removesudo 254712345678`);
+            return reply(` Could not resolve LID @${rawLid} to a phone number.\n\nTry using the phone number directly:\n${database.getBotSetting('prefix')}removesudo 254712345678`);
         }
 
         if (!database.isModerator(number)) {

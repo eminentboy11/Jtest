@@ -357,7 +357,7 @@ module.exports = [
 
     {
         name: 'aiLlama',
-        aliases: ['llamaai', 'ilama', 'llama3'],
+        aliases: ['llamaai', 'ilama'],
         category: 'ai',
         description: 'Ask Llama AI a question',
         usage: '.llama <question>',

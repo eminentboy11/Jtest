@@ -1,7 +1,6 @@
 /**
  * Set Bot Name Command — persists via database/bot-settings.json
  */
-const config = require('../../config');
 const db = require('../../database');
 
 const DEFAULT_BOT_NAME = 'JuneX-Ultra';
@@ -42,7 +41,7 @@ module.exports = {
       if (!newBotName) {
         return extra.reply(
           `📝 *Set Bot Name*\n\n` +
-          `Current bot name: *${config.botName}*\n` +
+          `Current bot name: *${db.getBotSetting('botName')}*\n` +
           `Default bot name:  *${DEFAULT_BOT_NAME}*\n\n` +
           `Usage:\n` +
           `  .setbotname <new name>\n` +
@@ -57,7 +56,7 @@ module.exports = {
 
       // Persist to database and update runtime config
       db.setBotSetting('botName', newBotName);
-      config.botName = newBotName;
+      db.setBotSetting('botName', newBotName);
 
       const headline = isReset
         ? `✅ Bot name reset to default: *${newBotName}*`

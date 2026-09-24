@@ -1,5 +1,5 @@
-const config = require('../../config');
 const { generateEphoto, downloadMedia, sendGeneratedMedia } = require('./ephotoVideo');
+const database = require('../../database');
 
 const EFFECT_URLS = [
   'https://en.ephoto360.com/free-logo-intro-video-maker-online-558.html',
@@ -12,11 +12,11 @@ module.exports = {
   aliases: ['intro', 'logointro', 'introanimation', 'videointro'],
   category: 'aivideo',
   description: 'Create a logo intro video with your text',
-  usage: `${config.prefix || '.'}introvideo <text>`,
+  usage: `${database.getBotSetting('prefix') || '.'}introvideo <text>`,
 
   async execute(sock, msg, args, extra = {}) {
     const jid = msg.key.remoteJid;
-    const prefix = extra.prefix || config.prefix || '.';
+    const prefix = extra.prefix || database.getBotSetting('prefix') || '.';
     await sock.sendMessage(jid, { react: { text: '⏳', key: msg.key } });
 
     try {
@@ -25,7 +25,7 @@ module.exports = {
         return sock.sendMessage(
           jid,
           {
-            text: `🎬 Logo intro video\n\nUsage: ${prefix}introvideo <text>\nMaximum: 30 characters\nExample: ${prefix}introvideo ${config.botName || 'JUNE-X'}`,
+            text: `🎬 Logo intro video\n\nUsage: ${prefix}introvideo <text>\nMaximum: 30 characters\nExample: ${prefix}introvideo ${database.getBotSetting('botName') || 'JUNE-X'}`,
           },
           { quoted: msg },
         );

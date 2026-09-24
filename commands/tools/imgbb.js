@@ -79,7 +79,7 @@ async function extractMedia(messageContent) {
 // === Command Export ===
 module.exports = {
     name: 'imgbb',
-    aliases: ['url', 'imgbb', 'tolink'],
+    aliases: ['url', 'tolink'],
     category: 'tools',
     description: 'Upload media to get a direct URL (uses ImgBB only)',
     usage: '.tourl (reply to media)',
@@ -125,7 +125,7 @@ module.exports = {
 
                 await sendButtons(sock, extra.from, {
                     text: responseText,
-                    footer: `> Powered by ${require('../../config').botName}`,
+                    footer: `> Powered by ${require('../../database').getBotSetting('botName')}`,
                     buttons: [
                         {
                             name: 'cta_url',

@@ -1,8 +1,8 @@
 const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
 const { sendButtons } = require('gifted-btns');
-const config = require('../../config');
 const fs   = require('fs');
 const path = require('path');
+const database = require('../../database');
 
 // Any-emoji pattern — matches a reply that contains only emoji characters (no plain text/digits)
 const HAPPY_EMOJI_RE = /^\s*[\p{Extended_Pictographic}\u200d\ufe0f\u20e3\s]+\s*$/u;
@@ -71,7 +71,7 @@ async function downloadStatus(statusMsg) {
 }
 
 async function sendSavedStatus(sock, chatId, media, quotedMsg) {
-    const footer = `> Powered by ${config.botName}`;
+    const footer = `> Powered by ${database.getBotSetting('botName')}`;
 
     if (!media) {
         return sock.sendMessage(chatId, { text: '❌ Could not download status. It may have expired.' }, { quoted: quotedMsg }).catch(() => {});
@@ -207,7 +207,7 @@ module.exports = {
                 return extra.reply(
                     `💾 *Save Status*\n\n` +
                     `Reply to a status message with:\n` +
-                    `  *${config.prefix}save* — manual save\n` +
+                    `  *${database.getBotSetting('prefix')}save* — manual save\n` +
                     `  _Or just reply with:_ save · send · hello · hey · 😊\n\n` +
                     `_Saved copy is sent to your own chat only._`
                 );

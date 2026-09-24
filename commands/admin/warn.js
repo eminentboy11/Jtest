@@ -3,7 +3,6 @@
  */
 
 const database = require(require('path').join(global.__CORE__, 'database'));
-const config = require(require('path').join(global.__ROOT__, 'config'));
 
 module.exports = {
     name: 'warn',
@@ -52,9 +51,9 @@ module.exports = {
             let text = `⚠️ *USER WARNING*\n\n`;
             text += `👤 User: @${target.split('@')[0]}\n`;
             text += `📝 Reason: ${reason}\n`;
-            text += `⚠️ Warnings: ${warnings.count}/${config.maxWarnings}\n\n`;
+            text += `⚠️ Warnings: ${warnings.count}/${database.getBotSetting('maxWarnings')}\n\n`;
 
-            if (warnings.count >= config.maxWarnings) {
+            if (warnings.count >= database.getBotSetting('maxWarnings')) {
                 text += `❌ User has reached maximum warnings and will be removed!`;
 
                 await sock.sendMessage(extra.from, {

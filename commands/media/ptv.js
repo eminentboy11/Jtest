@@ -17,7 +17,7 @@ const SIZE         = 480;  // square edge in pixels
 // Probe a video file's duration in seconds via ffmpeg
 function probeDuration(filePath) {
   return new Promise((resolve) => {
-    execFile(ffmpegPath, ['-i', filePath], (_err, _stdout, stderr) => {
+    execFile(ffmpegPath(), ['-i', filePath], (_err, _stdout, stderr) => {
       const m = (stderr || '').match(/Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/);
       if (!m) return resolve(0);
       resolve((+m[1]) * 3600 + (+m[2]) * 60 + parseFloat(m[3]));
@@ -27,7 +27,7 @@ function probeDuration(filePath) {
 
 module.exports = {
   name: 'ptv',
-  aliases: ['videonote', 'vn', 'tovn', 'tovideonote', 'circlevid'],
+  aliases: ['videonote', 'vn', 'tovideonote', 'circlevid'],
   category: 'media',
   description: 'Convert a video to a WhatsApp video note (round/PTV)',
   usage: '.ptv  (reply to a video, gif, or sticker)',
@@ -98,7 +98,7 @@ module.exports = {
       ];
 
       await new Promise((resolve, reject) => {
-        execFile(ffmpegPath, ffArgs, (error, _stdout, stderr) => {
+        execFile(ffmpegPath(), ffArgs, (error, _stdout, stderr) => {
           if (error) {
             const tail = (stderr || '').split('\n').slice(-4).join(' ').trim();
             return reject(new Error(`FFmpeg failed: ${tail || error.message}`));

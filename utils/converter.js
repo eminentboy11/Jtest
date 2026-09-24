@@ -24,7 +24,7 @@ function ffmpeg(buffer, args = [], ext = '', ext2 = '') {
       let tmp = path.join(tempDir, Date.now() + '.' + ext)
       let out = tmp + '.' + ext2
       await fs.promises.writeFile(tmp, buffer)
-      spawn(ffmpegBin, [
+      spawn(ffmpegBin(), [
         '-y',
         '-i', tmp,
         ...args,

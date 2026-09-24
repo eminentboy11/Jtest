@@ -4,7 +4,7 @@
 
 const axios = require('axios');
 const { sendButtons } = require('gifted-btns');
-const config = require('../../config');
+const database = require('../../database');
 
 module.exports = {
   name: 'weather',
@@ -21,9 +21,7 @@ module.exports = {
 
       const city = args.join(' ');
       const apiKey = process.env.OPENWEATHER_API_KEY || '';
-      if (!apiKey) {
-        return extra.reply('❌ Weather support is not configured. Set OPENWEATHER_API_KEY on the server.');
-      }
+      if (!apiKey) return extra.reply('❌ Weather API key not configured. Set OPENWEATHER_API_KEY in env.');
 
       await sock.sendMessage(extra.from, { react: { text: '⏳', key: msg.key } });
 
@@ -69,7 +67,7 @@ module.exports = {
 
       await sendButtons(sock, extra.from, {
         text,
-        footer: `> Powered by ${config.botName}`,
+        footer: `> Powered by ${database.getBotSetting('botName')}`,
         buttons: [
           {
             name: 'cta_url',

@@ -87,7 +87,7 @@ module.exports = {
       }
 
     } catch (error) {
-      console.error('Error in simage/toimage command:', error);
+      console.log('[FFMPEG-ERR] simage/toimage command:', error);
       await extra.reply(`❌ Failed to convert sticker.\n\nError: ${error.message}`);
     }
   }

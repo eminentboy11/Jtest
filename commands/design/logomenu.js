@@ -1,4 +1,4 @@
-const config = require('../../config');
+const database = require('../../database');
 
 module.exports = {
   name: 'logomenu',
@@ -9,8 +9,8 @@ module.exports = {
 
   async execute(sock, msg) {
     const jid = msg.key.remoteJid;
-    const prefix = config.prefix || '.';
-    const botName = config.botName || 'JuneX-Ultra';
+    const prefix = database.getBotSetting('prefix') || '.';
+    const botName = database.getBotSetting('botName') || 'JuneX-Ultra';
     const commandsText = `🌟 Premium metals
 
 • ${prefix}goldlogo

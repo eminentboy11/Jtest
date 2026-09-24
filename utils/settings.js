@@ -9,7 +9,6 @@
  *   const settings = require('./utils/settings');
  *   settings.get('prefix')          // read a value
  *   settings.set('prefix', '!')     // write and persist
- *   settings.applyToConfig(config)  // call once at startup
  */
 
 const db = require('../database');
@@ -47,13 +46,4 @@ function save(data) {
   db.updateBotSettings(data);
 }
 
-function applyToConfig(config) {
-  const all = db.getAllBotSettings();
-  for (const [key, value] of Object.entries(all)) {
-    if (key in config) {
-      config[key] = value;
-    }
-  }
-}
-
-module.exports = { get, set, load, save, applyToConfig, DEFAULTS };
+module.exports = { get, set, load, save, DEFAULTS };

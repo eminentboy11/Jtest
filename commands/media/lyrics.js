@@ -3,7 +3,7 @@
  */
 
 const axios = require('axios');
-const config = require('../../config');
+const database = require('../../database');
 
 module.exports = {
   name: 'lyrics',
@@ -17,7 +17,7 @@ module.exports = {
 
     if (args.length === 0) {
       return await sock.sendMessage(jid, {
-        text: `❌ Please provide a song name!\n\nExample: ${config.prefix}lyrics Despacito`
+        text: `❌ Please provide a song name!\n\nExample: ${database.getBotSetting('prefix')}lyrics Despacito`
       });
     }
 
@@ -46,7 +46,7 @@ module.exports = {
         `🎵 *${r.song || 'Unknown Title'}*\n` +
         `👤 *Artist:* ${r.artist || 'Unknown Artist'}\n\n` +
         `📝 *Lyrics:*\n${lyrics}\n\n` +
-        `_Fetched by ${config.botName}_`;
+        `_Fetched by ${database.getBotSetting('botName')}_`;
 
       if (r.thumbnail) {
         await sock.sendMessage(jid, {

@@ -1,7 +1,7 @@
 // commands/tiktok.js
 
 const axios = require('axios');
-const config = require('../../config');
+const database = require('../../database');
 
 const processedMessages = new Set();
 
@@ -9,7 +9,7 @@ const tiktokPattern = /https?:\/\/(?:(?:www|vm|vt|m)\.)?tiktok\.com\/\S+/i;
 
 module.exports = {
     name: 'tt',
-    aliases: ['tik', 'ttdl2', 'tiktokdl2'],
+    aliases: ['tik'],
     category: 'media',
     description: 'Download TikTok videos without watermark',
     usage: '.tiktok <TikTok URL>',
@@ -26,7 +26,7 @@ module.exports = {
 
             if (!url) {
                 return await sock.sendMessage(from, {
-                    text: `❌ Please provide a TikTok URL.\n\nUsage: \`${config.prefix || '.'}tiktok <URL>\``
+                    text: `❌ Please provide a TikTok URL.\n\nUsage: \`${database.getBotSetting('prefix') || '.'}tiktok <URL>\``
                 }, { quoted: msg });
             }
 
@@ -65,7 +65,7 @@ module.exports = {
             await sock.sendMessage(from, {
                 video: { url: videoUrl },
                 mimetype: 'video/mp4',
-                caption: config.botName,
+                caption: database.getBotSetting('botName'),
             }, { quoted: msg });
 
             await sock.sendMessage(from, { react: { text: '✅', key: msg.key } });

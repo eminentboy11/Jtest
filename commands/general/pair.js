@@ -4,7 +4,7 @@
 
 const axios = require('axios');
 const { sendButtons } = require('gifted-btns');
-const config = require('../../config');
+const database = require('../../database');
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -74,7 +74,7 @@ module.exports = {
 
                     await sendButtons(sock, chatId, {
                         text: `🔐 *Pairing Code for ${number}*\n\n\`\`\`${code}\`\`\`\n\n📲 *How to link your device:*\n1️⃣ Open WhatsApp on your phone\n2️⃣ Tap *Menu* (⋮) or *Settings*\n3️⃣ Go to *Linked Devices*\n4️⃣ Tap *Link a Device*\n5️⃣ Tap *Link with phone number instead*\n6️⃣ Enter the code above 👆\n\n⏱️ _Code expires in a few minutes. Act fast!_`,
-                        footer: `Powered by ${config.botName}`,
+                        footer: `Powered by ${database.getBotSetting('botName')}`,
                         buttons: [
                             {
                                 name: 'cta_copy',

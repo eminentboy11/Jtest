@@ -66,7 +66,7 @@ function findSource(msg) {
 
 function probeDuration(filePath) {
     return new Promise(resolve => {
-        execFile(ffmpegPath, ['-i', filePath], (_err, _stdout, stderr) => {
+        execFile(ffmpegPath(), ['-i', filePath], (_err, _stdout, stderr) => {
             const m = (stderr || '').match(/Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/);
             if (!m) return resolve(0);
             resolve((+m[1]) * 3600 + (+m[2]) * 60 + parseFloat(m[3]));
@@ -76,7 +76,7 @@ function probeDuration(filePath) {
 
 function runFfmpeg(args) {
     return new Promise((resolve, reject) => {
-        execFile(ffmpegPath, args, (error, _stdout, stderr) => {
+        execFile(ffmpegPath(), args, (error, _stdout, stderr) => {
             if (error) {
                 const tail = (stderr || '').split('\n').slice(-4).join(' ').trim();
                 return reject(new Error(tail || error.message));

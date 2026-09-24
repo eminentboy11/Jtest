@@ -1,4 +1,4 @@
-const config = require('../../config');
+const database = require('../../database');
 const {
   getInput,
   isHttpUrl,
@@ -20,7 +20,7 @@ module.exports = {
   aliases: ['pornhub', 'porno', 'adultvid', '18plus'],
   category: 'media',
   description: 'Download adult videos by name or supported URL',
-  usage: `${config.prefix || '.'}porn <name or URL>`,
+  usage: `${database.getBotSetting('prefix') || '.'}porn <name or URL>`,
 
   async execute(sock, msg, args, extra = {}) {
     const jid = msg.key.remoteJid;
@@ -28,7 +28,7 @@ module.exports = {
     if (!input) {
       return sock.sendMessage(
         jid,
-        { text: `Usage: ${extra.prefix || config.prefix || '.'}porn <name or URL>\nSupports XVideos and XHamster.` },
+        { text: `Usage: ${extra.prefix || database.getBotSetting('prefix') || '.'}porn <name or URL>\nSupports XVideos and XHamster.` },
         { quoted: msg },
       );
     }
@@ -58,7 +58,7 @@ module.exports = {
         jid,
         {
           video,
-          caption: `${details}\n${config.botName || 'JuneX-Ultra'}`,
+          caption: `${details}\n${database.getBotSetting('botName') || 'JuneX-Ultra'}`,
           mimetype: 'video/mp4',
           fileName: safeFileName(result.title, 'adult-video'),
         },

@@ -64,7 +64,7 @@ async function writeExifVid(videoBuffer, metadata) {
     
     // Convert mp4 to webp using ffmpeg
     await new Promise((resolve, reject) => {
-      const ff = spawn(ffmpegPath, [
+      const ff = spawn(ffmpegPath(), [
         '-y',
         '-i', inputPath,
         '-vf', 'scale=512:512:force_original_aspect_ratio=decrease,fps=15,pad=512:512:(ow-iw)/2:(oh-ih)/2:color=#00000000',

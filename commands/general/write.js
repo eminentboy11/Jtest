@@ -17,7 +17,7 @@ const sharp  = require('sharp');
 const webp   = require('node-webpmux');
 const { downloadMediaMessage } = require('@whiskeysockets/baileys');
 const { getTempDir, deleteTempFile } = require('../../utils/tempManager');
-const config = require('../../config');
+const database = require('../../database');
 
 // ─── ffmpeg resolver (used only for animated stickers/video) ────────────────
 // Searches several known locations so it works on Replit, Heroku, VPS, etc.
@@ -183,7 +183,7 @@ async function addExif(buffer) {
     await img.load(buffer);
     const json = {
         'sticker-pack-id':   crypto.randomBytes(32).toString('hex'),
-        'sticker-pack-name': config.packname || config.botName,
+        'sticker-pack-name': database.getBotSetting('packname') || database.getBotSetting('botName'),
         emojis: ['✍️'],
     };
     const exifAttr = Buffer.from([

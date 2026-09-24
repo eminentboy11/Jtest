@@ -8,7 +8,7 @@ const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
 const { sendButtons } = require('gifted-btns');
-const config = require('../../config');
+const database = require('../../database');
 
 const RETRY_DELAY = 3000;
 const MAX_RESULTS = 5;
@@ -100,7 +100,7 @@ async function downloadSoundCloud(trackUrl) {
  * ID: <prefix>sctrack_<index>_<dateNow>
  */
 function getTrackButtons(tracks, dateNow) {
-    const prefix = config.prefix || '.';
+    const prefix = database.getBotSetting('prefix') || '.';
     return tracks.map((track, i) => ({
         id:   `${prefix}sctrack_${i}_${dateNow}`,
         text: `${i + 1}. ${track.title.substring(0, 22)}${track.title.length > 22 ? '…' : ''}`,
@@ -112,7 +112,7 @@ function getTrackButtons(tracks, dateNow) {
  * ID: <prefix>scfmt_<format>_<dateNow>
  */
 function getFormatButtons(dateNow) {
-    const prefix = config.prefix || '.';
+    const prefix = database.getBotSetting('prefix') || '.';
     return [
         { id: `${prefix}scfmt_audio_${dateNow}`,    text: '🎶 Audio' },
         { id: `${prefix}scfmt_audiodoc_${dateNow}`, text: '📄 Audio Document' },
@@ -155,7 +155,7 @@ module.exports = {
         }
 
         const from           = extra.from;
-        const prefix         = config.prefix || '.';
+        const prefix         = database.getBotSetting('prefix') || '.';
         const originalSender = msg.key.participant || msg.key.remoteJid;
 
         // ── Direct SoundCloud URL — skip search, straight to format buttons ──
@@ -169,7 +169,7 @@ module.exports = {
                 text:
                     `⿻ *Link:* ${query}\n\n` +
                     `*Select download format:*`,
-                footer:  `Made by ${config.botName}`,
+                footer:  `Made by ${database.getBotSetting('botName')}`,
                 buttons: getFormatButtons(fmtDateNow),
             }, { quoted: msg });
 
@@ -225,7 +225,7 @@ module.exports = {
                             document: { url: filePath },
                             mimetype: 'audio/mpeg',
                             fileName: `${cleanTitle}.mp3`,
-                            caption:  `🎧 ${apiData.title}\n> ${config.botName}`,
+                            caption:  `🎧 ${apiData.title}\n> ${database.getBotSetting('botName')}`,
                         }, { quoted: fmtMsg });
                     }
 
@@ -273,7 +273,7 @@ module.exports = {
                 `*Query:* _${query}_\n\n` +
                 `${trackList}\n\n` +
                 `*Select a track to download:*`,
-            footer:  `Made by ${config.botName}`,
+            footer:  `Made by ${database.getBotSetting('botName')}`,
             buttons: getTrackButtons(tracks, dateNow),
         }, { quoted: msg });
 
@@ -313,7 +313,7 @@ module.exports = {
                     `⿻ *Released:* ${track.release_date  || 'N/A'}\n` +
                     `⿻ *Link:*     ${track.url           || 'N/A'}\n\n` +
                     `*Select download format:*`,
-                footer:  `Made by ${config.botName}`,
+                footer:  `Made by ${database.getBotSetting('botName')}`,
                 buttons: getFormatButtons(fmtDateNow),
             }, { quoted: messageData });
 
@@ -377,7 +377,7 @@ module.exports = {
                             document: { url: filePath },
                             mimetype: 'audio/mpeg',
                             fileName: `${cleanTitle}.mp3`,
-                            caption:  `🎧 ${rawTitle}\n> ${config.botName}`,
+                            caption:  `🎧 ${rawTitle}\n> ${database.getBotSetting('botName')}`,
                         }, { quoted: fmtMsg });
                     }
 

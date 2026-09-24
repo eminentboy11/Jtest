@@ -1,9 +1,9 @@
 const axios = require('axios');
-const config = require('../../config');
 const APIs = require('../../utils/api');
+const database = require('../../database');
 
 const DEFAULT_USER = 'torvalds';
-const getFooter = () => `Powered by ${config.botName}`;
+const getFooter = () => `Powered by ${database.getBotSetting('botName')}`;
 
 module.exports = {
   name: 'gitstalk',
@@ -13,7 +13,7 @@ module.exports = {
 
   async execute(sock, m, args, extra) {
     const jid = m.key.remoteJid;
-    const prefix = config.prefix || '.';
+    const prefix = database.getBotSetting('prefix') || '.';
 
     if (!args || !args[0]) {
       return sock.sendMessage(jid, {
@@ -22,7 +22,7 @@ module.exports = {
           `➥ Command    ➜ ${prefix}gitstalk <username>\n` +
           `➥ Usage      ➜ Stalk a GitHub profile\n` +
           `➥ Example    ➜ ${prefix}gitstalk ${DEFAULT_USER}\n` +
-          `➥ Powered By ➜ ${config.botName}\n` +
+          `➥ Powered By ➜ ${database.getBotSetting('botName')}\n` +
           `┗━━━━━━━━━━━━━━━━`
       }, { quoted: m });
     }

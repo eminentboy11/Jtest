@@ -3,6 +3,7 @@
  */
 
 const axios = require('axios');
+const database = require('../../database');
 
 const BASE = 'https://api.shizo.top/pies';
 const VALID_COUNTRIES = ['india','malaysia', 'thailand', 'china', 'indonesia', 'japan', 'korea', 'vietnam'];
@@ -21,8 +22,7 @@ module.exports = {
                    '';
       
       // Extract command from message (e.g., ".india" or ".pies india")
-      const config = require('../../config');
-      const prefix = config.prefix || '.';
+      const prefix = database.getBotSetting('prefix') || '.';
       const parts = text.trim().split(/\s+/);
       const commandUsed = parts[0]?.replace(prefix, '').toLowerCase() || '';
       

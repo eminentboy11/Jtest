@@ -1,5 +1,4 @@
 const database = require('../../database');
-const config = require('../../config');
 const { resolvePhone } = require('../../utils/jidHelper');
 
 async function resolveToPhone(sock, jid) {
@@ -29,14 +28,14 @@ module.exports = {
         }
 
         if (!targetJid) {
-            return reply(`❌ *Usage:* ${config.prefix}addsudo @user or ${config.prefix}addsudo 254712345678`);
+            return reply(`❌ *Usage:* ${database.getBotSetting('prefix')}addsudo @user or ${database.getBotSetting('prefix')}addsudo 254712345678`);
         }
 
         let number = await resolveToPhone(sock, targetJid);
 
         if (!number) {
             const rawLid = targetJid.split('@')[0].split(':')[0];
-            return reply(`❌ Could not resolve LID @${rawLid} to a phone number.\n\nTry using the phone number directly:\n${config.prefix}addsudo 254712345678`);
+            return reply(`❌ Could not resolve LID @${rawLid} to a phone number.\n\nTry using the phone number directly:\n${database.getBotSetting('prefix')}addsudo 254712345678`);
         }
 
         if (database.isModerator(number)) {

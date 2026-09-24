@@ -14,9 +14,9 @@
  * (interactive login menu, or a clear exit message on headless platforms).
  *
  * Entry shape (simple):
- *   { phone: '2547...', sessionId: 'JUNE-MD:~...' }
+ *   { phone: '2547...', sessionId: 'JUNE-X~ab12cd' }
  * Entry shape (full, optional overrides):
- *   { id: 'main', name: 'June Main', phone: '2547...', sessionId: 'JUNE-MD:~...' }
+ *   { id: 'main', name: 'June Main', phone: '2547...', sessionId: 'JUNE-X~ab12cd' }
  *
  * The actual Baileys boot lives in index.js (startBotSocket); the manager
  * receives it via setBootFn so it can be unit-tested without network access.
@@ -403,11 +403,14 @@ const last3Digits = (value) => {
 
 // Supported session-ID formats shared by web provisioning and engine bootstrap
 // so validation stays in one place.
-const VALID_PREFIXES = ['JUNE-MD:~', 'Ultra-X:~', 'June-Ultra:~', 'June::~'];
+const VALID_PREFIXES = ['JUNE-X~'];
+const SESSION_ID_PATTERN = /^JUNE-X~[A-Za-z0-9]{4,20}$/i;
+const LEGACY_PREFIXES = ['JUNE-MD:~', 'Ultra-X:~', 'June-Ultra:~', 'June::~', 'ultra-x:~', 'June-X:~', 'june-ultra:~'];
 
 const isValidSessionIdFormat = (value) => {
     const sessionId = String(value || '').trim();
-    return Boolean(sessionId) && VALID_PREFIXES.some((p) => sessionId.startsWith(p));
+    if (!sessionId) return false;
+    return SESSION_ID_PATTERN.test(sessionId);
 };
 
 /**
@@ -454,7 +457,7 @@ function addSessionEntry(registry, entry = {}) {
  * Normalize raw registry entries into fully-qualified session entries.
  *
  * SIMPLE FORMAT (recommended): just sessionId + phone —
- *   [ { "sessionId": "JUNE-MD:~...", "phone": "2348154853640" } ]
+ *   [ { "sessionId": "JUNE-X~ab12cd", "phone": "2348154853640" } ]
  *
  *   id    → derived from the phone automatically (duplicate numbers get
  *           -2, -3 … suffixes so two sessions may share one number)

@@ -1,9 +1,9 @@
 const { applyFont } = require('../../utils/fontConverter');
 const axios  = require('axios');
-const config = require('../../config');
 const fs     = require('fs');
 const path   = require('path');
 const os     = require('os');
+const database = require('../../database');
 
 function parseGitHubUrl(input) {
     try {
@@ -29,7 +29,7 @@ module.exports = {
 
     async execute(sock, msg, args, extra) {
         const chatId = extra.from;
-        const prefix = config.prefix || '.';
+        const prefix = database.getBotSetting('prefix') || '.';
         const input  = args.join(' ').trim();
 
         if (!input) {
@@ -113,7 +113,7 @@ module.exports = {
                     `➥ Branch     ➜ ${defaultBranch}\n` +
                     `➥ Size       ➜ ${fileSizeMB} MB\n\n` +
                     `┗━━━━━━━━━━━━━━━━\n\n` +
-                    `> ${config.botName}`
+                    `> ${database.getBotSetting('botName')}`
                 ),
             }, { quoted: msg });
 

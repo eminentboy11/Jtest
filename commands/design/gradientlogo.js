@@ -1,8 +1,8 @@
 const { createCanvas } = require('@napi-rs/canvas');
-const config = require('../../config');
+const database = require('../../database');
 
 function getBotName() {
-  return config.botName || 'JuneX-Ultra';
+  return database.getBotSetting('botName') || 'JuneX-Ultra';
 }
 
 function getFooter() {

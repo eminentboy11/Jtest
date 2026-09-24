@@ -1,8 +1,6 @@
 'use strict';
+const database = require('../../database');
 
-const fs = require('fs');
-const path = require('path');
-const configPath = path.join(__dirname, '../../config.js');
 
 module.exports = {
   name: 'anticall',
@@ -14,8 +12,7 @@ module.exports = {
 
   async execute(sock, msg, args, extra) {
     const option = args[0]?.toLowerCase().trim();
-    const config = require('../../config');
-    const current = config.defaultGroupSettings.anticall ? 'enabled' : 'disabled';
+    const current = database.getDefaultGroupSettings().anticall ? 'enabled' : 'disabled';
 
     if (!option) {
       return extra.reply(
@@ -39,29 +36,10 @@ module.exports = {
     const action = option === 'decline' ? 'decline' : 'block';
 
     try {
-      let configFile = fs.readFileSync(configPath, 'utf8');
-
-      // Update anticall enabled/disabled
-      configFile = configFile.replace(
-        /anticall:\s*(true|false)/,
-        `anticall: ${enabled}`
-      );
-
-      // Update action type
-      if (configFile.includes('anticallAction')) {
-        configFile = configFile.replace(
-          /anticallAction:\s*['"]([^'"]+)['"]/,
-          `anticallAction: '${action}'`
-        );
-      } else {
-        configFile = configFile.replace(
-          /anticall:\s*(true|false)/,
-          `anticall: ${enabled},\n      anticallAction: '${action}'`
-        );
-      }
-
-      fs.writeFileSync(configPath, configFile);
-      delete require.cache[require.resolve('../../config')];
+      // Stored in SQLite. This used to rewrite config.js on disk, which the
+      // public loader overwrites from the published build on every boot.
+      database.setBotSetting('anticall', enabled);
+      database.setBotSetting('anticallAction', action);
 
       const replies = {
         off: {

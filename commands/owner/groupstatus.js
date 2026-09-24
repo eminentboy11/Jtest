@@ -1,16 +1,16 @@
 const crypto = require('crypto');
+const {
+  generateWAMessageContent,
+  generateWAMessageFromContent,
+  downloadContentFromMessage,
+} = require('@whiskeysockets/baileys');
 const { PassThrough } = require('stream');
 const ffmpeg = require('fluent-ffmpeg');
 const ffmpegPath = require('../../utils/ffmpegPath');
 ffmpeg.setFfmpegPath(ffmpegPath);
 
 const PURPLE_COLOR = '#9C27B0';
-
-let _baileys = null;
-async function getBaileys() {
-  if (!_baileys) _baileys = await import('@whiskeysockets/baileys');
-  return _baileys;
-}
+const SUCCESS_EMOJI = '✅';
 
 module.exports = [
   {
@@ -40,36 +40,29 @@ module.exports = [
             '📝 *Group Status Usage*\n\n' +
             '*In a group:*\n' +
             '  `.swgc Your text here`\n' +
-            '  `.swgc` (reply to image/video/audio)\n\n' +
+            '  `.swgc` (reply to image/video/audio/text)\n\n' +
             '*From private chat:*\n' +
             '  `.swgc Hello everyone <groupJid>`\n' +
-            '  `.swgc <groupJid>` (reply to media)'
+            '  `.swgc <groupJid>` (reply to media/text)'
           );
         }
 
         const caption = captionArgs.join(' ').trim();
+        const ctxInfo = msg.message?.extendedTextMessage?.contextInfo;
+        const rawQuoted = ctxInfo?.quotedMessage;
+        const hasQuoted = !!rawQuoted;
 
-        const msgContent = msg.message || {};
-        const ctxInfo =
-          msgContent.extendedTextMessage?.contextInfo ||
-          msgContent.imageMessage?.contextInfo ||
-          msgContent.videoMessage?.contextInfo ||
-          msgContent.audioMessage?.contextInfo ||
-          msgContent.documentMessage?.contextInfo ||
-          null;
-        const hasQuoted = !!ctxInfo?.quotedMessage;
-
-        // ── TEXT STATUS ──────────────────────────────────────────
+        // ── TEXT STATUS (no quote) ───────────────────────────────
         if (!hasQuoted) {
           if (!caption) {
             return extra.reply(
               '📝 *Group Status Usage*\n\n' +
               '*In a group:*\n' +
               '  `.swgc Your text here`\n' +
-              '  `.swgc` (reply to image/video/audio)\n\n' +
+              '  `.swgc` (reply to image/video/audio/text)\n\n' +
               '*From private chat:*\n' +
               '  `.swgc Hello everyone <groupJid>`\n' +
-              '  `.swgc <groupJid>` (reply to media)'
+              '  `.swgc <groupJid>` (reply to media/text)'
             );
           }
           try {
@@ -77,24 +70,53 @@ module.exports = [
               text: caption,
               backgroundColor: PURPLE_COLOR,
             });
-            return extra.react('✅');
+            return react(sock, msg, from);
           } catch (e) {
             console.error('[groupstatus] text error:', e);
             return extra.reply('❌ Failed to post text status: ' + (e.message || e));
           }
         }
 
-        // ── MEDIA STATUS ─────────────────────────────────────────
+        // ── QUOTED CONTENT ────────────────────────────────────────
+        const unwrapped = unwrapMessage(rawQuoted);
+        if (!unwrapped) {
+          return extra.reply('❌ Could not read the quoted message.');
+        }
+
         const quotedMsg = {
           key: {
             remoteJid: from,
             id: ctxInfo.stanzaId,
             participant: ctxInfo.participant,
           },
-          message: ctxInfo.quotedMessage,
+          message: unwrapped,
         };
 
-        const mtype = Object.keys(quotedMsg.message)[0] || '';
+        const mtype = Object.keys(unwrapped)[0] || '';
+
+        // QUOTED TEXT
+        if (/^(conversation|extendedTextMessage)$/i.test(mtype)) {
+          const quotedText =
+            unwrapped.conversation ||
+            unwrapped.extendedTextMessage?.text ||
+            '';
+          const text = caption || quotedText;
+
+          if (!text) {
+            return extra.reply('❌ The quoted message has no readable text.');
+          }
+
+          try {
+            await postGroupStatus(sock, targetJid, {
+              text,
+              backgroundColor: PURPLE_COLOR,
+            });
+            return react(sock, msg, from);
+          } catch (e) {
+            console.error('[groupstatus] quoted text error:', e);
+            return extra.reply('❌ Failed to post text status: ' + (e.message || e));
+          }
+        }
 
         // IMAGE / STICKER
         if (/image|sticker/i.test(mtype)) {
@@ -104,12 +126,13 @@ module.exports = [
           } catch {
             return extra.reply('❌ Failed to download image/sticker.');
           }
+
           try {
             await postGroupStatus(sock, targetJid, {
               image: buf,
               caption: caption || '',
             });
-            return extra.react('✅');
+            return react(sock, msg, from);
           } catch (e) {
             console.error('[groupstatus] image error:', e);
             return extra.reply('❌ Failed to post image status: ' + (e.message || e));
@@ -124,12 +147,13 @@ module.exports = [
           } catch {
             return extra.reply('❌ Failed to download video.');
           }
+
           try {
             await postGroupStatus(sock, targetJid, {
               video: buf,
               caption: caption || '',
             });
-            return extra.react('✅');
+            return react(sock, msg, from);
           } catch (e) {
             console.error('[groupstatus] video error:', e);
             return extra.reply('❌ Failed to post video status: ' + (e.message || e));
@@ -144,10 +168,21 @@ module.exports = [
           } catch {
             return extra.reply('❌ Failed to download audio.');
           }
+
           let vnBuf;
-          try { vnBuf = await toVN(buf); } catch { vnBuf = buf; }
+          try {
+            vnBuf = await toVN(buf);
+          } catch {
+            vnBuf = buf;
+          }
+
           let waveform;
-          try { waveform = await generateWaveform(buf); } catch { waveform = undefined; }
+          try {
+            waveform = await generateWaveform(buf);
+          } catch {
+            waveform = undefined;
+          }
+
           try {
             await postGroupStatus(sock, targetJid, {
               audio: vnBuf,
@@ -155,14 +190,19 @@ module.exports = [
               ptt: true,
               waveform,
             });
-            return extra.react('✅');
+            return react(sock, msg, from);
           } catch (e) {
             console.error('[groupstatus] audio error:', e);
             return extra.reply('❌ Failed to post audio status: ' + (e.message || e));
           }
         }
 
-        return extra.reply('❌ Unsupported media type. Reply to an image, video, or audio.');
+        // DOCUMENT (e.g. sent as a file, incl. document-wrapped images/audio unwrapped above)
+        if (/document/i.test(mtype)) {
+          return extra.reply('❌ Unsupported media type. Reply to an image, sticker, video, audio, or text message.');
+        }
+
+        return extra.reply('❌ Unsupported media type. Reply to an image, sticker, video, audio, or text message.');
 
       } catch (e) {
         console.error('[groupstatus] outer error:', e);
@@ -174,8 +214,42 @@ module.exports = [
 
 // ── HELPERS ───────────────────────────────────────────────────────────────────
 
+// Unwraps view-once / ephemeral / document-with-caption wrappers to reach the
+// actual message content (text or media) inside a quoted message.
+function unwrapMessage(message) {
+  let m = message;
+  let guard = 0;
+  while (
+    m &&
+    (m.ephemeralMessage ||
+      m.viewOnceMessage ||
+      m.viewOnceMessageV2 ||
+      m.viewOnceMessageV2Extension ||
+      m.documentWithCaptionMessage) &&
+    guard < 5
+  ) {
+    m =
+      m.ephemeralMessage?.message ||
+      m.viewOnceMessage?.message ||
+      m.viewOnceMessageV2?.message ||
+      m.viewOnceMessageV2Extension?.message ||
+      m.documentWithCaptionMessage?.message;
+    guard++;
+  }
+  return m;
+}
+
+async function react(sock, msg, from, emoji = SUCCESS_EMOJI) {
+  try {
+    await sock.sendMessage(from, {
+      react: { text: emoji, key: msg.key },
+    });
+  } catch (e) {
+    console.error('[groupstatus] react error:', e);
+  }
+}
+
 async function downloadMedia(msg, type) {
-  const { downloadContentFromMessage } = await getBaileys();
   const mediaMsg = msg[`${type}Message`] || msg;
   const stream = await downloadContentFromMessage(mediaMsg, type);
   const chunks = [];
@@ -184,8 +258,6 @@ async function downloadMedia(msg, type) {
 }
 
 async function postGroupStatus(sock, jid, content) {
-  const { generateWAMessageContent, generateWAMessageFromContent } = await getBaileys();
-
   const backgroundColor = content.backgroundColor;
   delete content.backgroundColor;
 
@@ -208,7 +280,9 @@ async function postGroupStatus(sock, jid, content) {
         },
       },
     },
-    { userJid: sock.user.id }
+    {
+      userJid: sock.user.id,
+    }
   );
 
   await sock.relayMessage(jid, msg.message, { messageId: msg.key.id });
@@ -221,6 +295,7 @@ function toVN(buffer) {
     const output = new PassThrough();
     const chunks = [];
     input.end(buffer);
+
     ffmpeg(input)
       .noVideo()
       .audioCodec('libopus')
@@ -230,6 +305,7 @@ function toVN(buffer) {
       .on('error', reject)
       .on('end', () => resolve(Buffer.concat(chunks)))
       .pipe(output);
+
     output.on('data', (c) => chunks.push(c));
   });
 }
@@ -240,7 +316,9 @@ function generateWaveform(buffer, bars = 64) {
     input.end(buffer);
     const output = new PassThrough();
     const chunks = [];
+
     output.on('data', (c) => chunks.push(c));
+
     ffmpeg(input)
       .audioChannels(1)
       .audioFrequency(16000)
@@ -250,16 +328,21 @@ function generateWaveform(buffer, bars = 64) {
         const raw = Buffer.concat(chunks);
         const samples = raw.length / 2;
         const amps = [];
+
         for (let i = 0; i < samples; i++) {
           amps.push(Math.abs(raw.readInt16LE(i * 2)) / 32768);
         }
+
         const size = Math.floor(amps.length / bars);
         if (size === 0) return resolve(undefined);
+
         const avg = Array.from({ length: bars }, (_, i) =>
           amps.slice(i * size, (i + 1) * size).reduce((a, b) => a + b, 0) / size
         );
+
         const max = Math.max(...avg);
         if (max === 0) return resolve(undefined);
+
         resolve(
           Buffer.from(avg.map((v) => Math.floor((v / max) * 100))).toString('base64')
         );

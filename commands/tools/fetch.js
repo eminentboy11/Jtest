@@ -1,5 +1,4 @@
 const axios = require('axios');
-const config = require('../../config');
 
 const METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'];
 const MAX_FILE_SIZE = 100 * 1024 * 1024; // 100MB

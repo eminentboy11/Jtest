@@ -7,7 +7,7 @@ const database = require('../../database');
 // The mode is bot-wide and has one source of truth: SQLite bot_settings.
 const getMode = () => database.getAntieditMode();
 const setMode = (mode) => database.setAntieditMode(mode);
-const getTimezone = () => database.getBotSetting('timezone') || 'Africa/Nairobi';
+const getTimezone = () => database.getTimeZone();
 
 const messageStore = new Map();
 

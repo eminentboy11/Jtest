@@ -107,7 +107,7 @@ module.exports = {
                 ];
 
             await new Promise((resolve, reject) => {
-                execFile(ffmpegPath, ffmpegArgs, (error, _stdout, stderr) => {
+                execFile(ffmpegPath(), ffmpegArgs, (error, _stdout, stderr) => {
                     deleteTempFile(inputFile);
                     if (error) {
                         console.error('[Trim] FFmpeg stderr:', stderr);

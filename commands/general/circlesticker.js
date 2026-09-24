@@ -6,10 +6,11 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const { exec } = require('child_process');
+const ffmpegPath = require('../../utils/ffmpegPath');
 const { downloadMediaMessage } = require('@whiskeysockets/baileys');
 const webp = require('node-webpmux');
-const config = require('../../config');
 const { getTempDir, deleteTempFile } = require('../../utils/tempManager');
+const database = require('../../database');
 
 // Max file size: 50MB
 const MAX_FILE_SIZE = 50 * 1024 * 1024;
@@ -122,14 +123,14 @@ module.exports = {
       if (isAnimated) {
         if (isLargeFile) {
           // Large video: very aggressive compression, max 2 seconds, very low quality
-          ffmpegCommand = `ffmpeg -i "${tempInput}" -t 2 -vf "${circleFilter},fps=8" -c:v libwebp -preset default -loop 0 -vsync 0 -pix_fmt yuva420p -quality 30 -compression_level 6 -b:v 100k -max_muxing_queue_size 1024 "${tempOutput}"`;
+          ffmpegCommand = `"${ffmpegPath()}" -i "${tempInput}" -t 2 -vf "${circleFilter},fps=8" -c:v libwebp -preset default -loop 0 -vsync 0 -pix_fmt yuva420p -quality 30 -compression_level 6 -b:v 100k -max_muxing_queue_size 1024 "${tempOutput}"`;
         } else {
           // Normal video: aggressive compression, max 3 seconds, lower quality
-          ffmpegCommand = `ffmpeg -i "${tempInput}" -t 3 -vf "${circleFilter},fps=12" -c:v libwebp -preset default -loop 0 -vsync 0 -pix_fmt yuva420p -quality 50 -compression_level 6 -b:v 150k -max_muxing_queue_size 1024 "${tempOutput}"`;
+          ffmpegCommand = `"${ffmpegPath()}" -i "${tempInput}" -t 3 -vf "${circleFilter},fps=12" -c:v libwebp -preset default -loop 0 -vsync 0 -pix_fmt yuva420p -quality 50 -compression_level 6 -b:v 150k -max_muxing_queue_size 1024 "${tempOutput}"`;
         }
       } else {
         // Image: standard compression
-        ffmpegCommand = `ffmpeg -i "${tempInput}" -vf "${circleFilter}" -c:v libwebp -preset default -loop 0 -vsync 0 -pix_fmt yuva420p -quality 75 -compression_level 6 "${tempOutput}"`;
+        ffmpegCommand = `"${ffmpegPath()}" -i "${tempInput}" -vf "${circleFilter}" -c:v libwebp -preset default -loop 0 -vsync 0 -pix_fmt yuva420p -quality 75 -compression_level 6 "${tempOutput}"`;
       }
 
       await new Promise((resolve, reject) => {
@@ -178,8 +179,8 @@ module.exports = {
       // Create metadata
       const json = {
         'sticker-pack-id': crypto.randomBytes(32).toString('hex'),
-        'sticker-pack-name': packArg || config.packname || '✮⃝ˢᵘᵖʳᵉᵐᵉ ᴸᵒʳᵈ',
-        'sticker-pack-publisher': authorArg || config.author || '',
+        'sticker-pack-name': packArg || database.getBotSetting('packname') || '✮⃝ˢᵘᵖʳᵉᵐᵉ ᴸᵒʳᵈ',
+        'sticker-pack-publisher': authorArg || database.getBotSetting('author') || '',
         'emojis': ['⭕']
       };
 

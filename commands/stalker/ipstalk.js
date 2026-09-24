@@ -1,6 +1,6 @@
-const config = require('../../config');
 const APIs = require('../../utils/api');
-const getFooter = () => `Powered by ${config.botName}`;
+const database = require('../../database');
+const getFooter = () => `Powered by ${database.getBotSetting('botName')}`;
 
 module.exports = {
   name: 'ipstalk',
@@ -10,7 +10,7 @@ module.exports = {
 
   async execute(sock, m, args, extra) {
     const jid = m.key.remoteJid;
-    const prefix = config.prefix || '.';
+    const prefix = database.getBotSetting('prefix') || '.';
 
     if (!args || !args[0]) {
       return sock.sendMessage(jid, {
@@ -19,7 +19,7 @@ module.exports = {
           `➥ Command    ➜ ${prefix}ipstalk <IP address>\n` +
           `➥ Usage      ➜ Look up IP address info\n` +
           `➥ Example    ➜ ${prefix}ipstalk 41.90.70.195\n` +
-          `➥ Powered By ➜ ${config.botName}\n` +
+          `➥ Powered By ➜ ${database.getBotSetting('botName')}\n` +
           `┗━━━━━━━━━━━━━━━━`
       }, { quoted: m });
     }
@@ -40,7 +40,7 @@ module.exports = {
         `➥ ISP/AS Name ➜ ${d.asName || 'N/A'}\n` +
         `➥ AS Domain  ➜ ${d.asDomain || 'N/A'}`;
       if (d.continentCode) caption += `\n➥ Continent Code ➜ ${d.continentCode}`;
-      caption += `\n➥ Powered By ➜ ${config.botName}\n┗━━━━━━━━━━━━━━━━`;
+      caption += `\n➥ Powered By ➜ ${database.getBotSetting('botName')}\n┗━━━━━━━━━━━━━━━━`;
 
       await sock.sendMessage(jid, { text: caption }, { quoted: m });
       await sock.sendMessage(jid, { react: { text: '✅', key: m.key } });

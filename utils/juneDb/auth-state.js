@@ -21,6 +21,13 @@ const AUTH_META = {
   // SHA-256 fingerprint only — the raw SESSION_ID is never stored or logged.
   sessionIdFingerprint: 'session_id_fingerprint',
   sessionIdRevokedFingerprint: 'session_id_revoked_fingerprint',
+  // Provenance of the current auth state (v3.0.1+): 'session-server' |
+  // 'mirror-restore' | null (pre-3.0.1 store or fresh local pairing).
+  authSource: 'auth_source',
+  // '1' once this store's auth has opened a real WhatsApp connection (or was
+  // restored from the authoritative Session Server snapshot). Mirror-restored
+  // copies never carry this mark until they actually connect somewhere.
+  authConnectionVerified: 'auth_connection_verified',
 };
 
 const KEY_TYPES = [
@@ -114,6 +121,48 @@ function getSessionIdRevokedFingerprint(db) {
 function setSessionIdRevokedFingerprint(db, fingerprint) {
   ensureAuthSchema(db);
   setMeta(db, AUTH_META.sessionIdRevokedFingerprint, fingerprint || null);
+}
+
+function getAuthSource(db) {
+  ensureAuthSchema(db);
+  return getMeta(db, AUTH_META.authSource);
+}
+
+function setAuthSource(db, source) {
+  ensureAuthSchema(db);
+  setMeta(db, AUTH_META.authSource, source || null);
+}
+
+function isAuthConnectionVerified(db) {
+  ensureAuthSchema(db);
+  return getMeta(db, AUTH_META.authConnectionVerified) === '1';
+}
+
+function setAuthConnectionVerified(db, verified) {
+  ensureAuthSchema(db);
+  setMeta(db, AUTH_META.authConnectionVerified, verified ? '1' : '0');
+}
+
+// Trust gate for the Session Server fast path (v3.0.1+). The 'verified'
+// status behind hasVerifiedSQLiteAuth() only means the stored state is
+// structurally complete — a remote mirror restore sets it too, without any
+// proof those keys can still open a connection. Connecting on unproven
+// mirror keys can draw a false 401-logout that would also revoke a healthy
+// server-side session. The fast path (skip the authoritative server fetch,
+// connect with local state) is therefore only allowed when:
+//   - this store's auth has opened a real WhatsApp connection, or
+//   - it was restored from the authoritative Session Server snapshot, or
+//   - it was written by a pre-3.0.1 build that never recorded provenance
+//     (grandfathered: their 'verified' status was only ever set by a real
+//     migration or pairing on that disk).
+function isLocallyVerifiedAuth(db) {
+  ensureAuthSchema(db);
+  const connectionVerified = getMeta(db, AUTH_META.authConnectionVerified);
+  if (connectionVerified === '1') return true;
+  if (connectionVerified === '0') return false;
+  // Flag never written (pre-3.0.1 store): grandfather unless a v3.0.1
+  // provenance record says otherwise.
+  return getMeta(db, AUTH_META.authSource) === null;
 }
 
 function getSQLiteAuthStats(db) {
@@ -731,6 +780,9 @@ function clearSQLiteAuth(db, reason = 'cleared') {
     setMeta(db, AUTH_META.migratedAt, '');
     setMeta(db, AUTH_META.pendingFileMigration, '0');
     setMeta(db, 'invalid_reason', reason);
+    // v3.0.1: cleared state carries no provenance and no trust.
+    setMeta(db, AUTH_META.authConnectionVerified, '0');
+    setMeta(db, AUTH_META.authSource, null);
   });
   clear();
 }
@@ -750,6 +802,11 @@ module.exports = {
   setSessionIdFingerprint,
   getSessionIdRevokedFingerprint,
   setSessionIdRevokedFingerprint,
+  getAuthSource,
+  setAuthSource,
+  isAuthConnectionVerified,
+  setAuthConnectionVerified,
+  isLocallyVerifiedAuth,
   clearSQLiteAuth,
   useSQLiteAuthState,
 };

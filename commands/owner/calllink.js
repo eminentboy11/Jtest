@@ -1,3 +1,4 @@
+const database = require('../../database');
 /**
  * Call Link — sock.createCallLink('audio' | 'video', event?)
  * Creates a WhatsApp call link on the connected account.
@@ -10,7 +11,6 @@
  *   .calllink voice 2026-08-15 19:00
  */
 
-const config = require('../../config');
 
 function parseType(token) {
     const value = String(token || '').toLowerCase();
@@ -138,7 +138,7 @@ module.exports = {
         if (type) tokens.shift();
         else type = 'audio';
 
-        const tz = config.timezone || 'Africa/Lagos';
+        const tz = database.getTimeZone();
         let startTime = null;
         try {
             startTime = parseStart(tokens, tz);
@@ -176,7 +176,7 @@ module.exports = {
                 const { sendButtons } = require('gifted-btns');
                 await sendButtons(sock, extra.from, {
                     text,
-                    footer: `> Powered by ${config.botName || 'June-X Ultra'}`,
+                    footer: `> Powered by ${database.getBotSetting('botName') || 'June-X Ultra'}`,
                     buttons: [
                         {
                             name: 'cta_url',

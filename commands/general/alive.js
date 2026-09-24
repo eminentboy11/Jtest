@@ -1,5 +1,4 @@
 const os = require('os');
-const config = require('../../config');
 
 const botStartTime = Date.now() - Math.floor(process.uptime() * 1000);
 
@@ -34,7 +33,7 @@ const formatUptime = (ms) => {
 
 module.exports = {
     name: 'alive',
-    aliases: ['botcheck', 'status'],
+    aliases: ['botcheck'],
     category: 'general',
     description: 'Check if the bot is alive and running',
     usage: '.alive',

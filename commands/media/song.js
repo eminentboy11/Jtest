@@ -26,12 +26,8 @@ module.exports = {
             const isUrl = searchQuery.startsWith('http://') || searchQuery.startsWith('https://');
             let videoUrl = searchQuery;
             let title = searchQuery;
-            let duration = '';
-            let views = '';
-            let thumbnail = '';
-            let author = '';
 
-            // --- Metadata extraction ---
+            // --- Metadata extraction (yts, best-effort) ---
             if (!isUrl) {
                 const { videos } = await yts(searchQuery);
                 if (!videos || videos.length === 0) {
@@ -42,10 +38,6 @@ module.exports = {
                 const found = videos[0];
                 videoUrl = found.url;
                 title = found.title;
-                duration = found.timestamp || '';
-                views = found.views ? found.views.toLocaleString() : '';
-                thumbnail = found.thumbnail || '';
-                author = found.author?.name || '';
             } else {
                 try {
                     const ytId = (videoUrl.match(/(?:youtu\.be\/|v=)([a-zA-Z0-9_-]{11})/) || [])[1];
@@ -53,10 +45,6 @@ module.exports = {
                         const result = await yts({ videoId: ytId });
                         if (result && result.title) {
                             title = result.title;
-                            duration = result.timestamp || '';
-                            views = result.views ? result.views.toLocaleString() : '';
-                            thumbnail = result.thumbnail || '';
-                            author = result.author?.name || '';
                         }
                     }
                 } catch (e) {}
@@ -90,7 +78,7 @@ module.exports = {
             }
 
             // Use title from API if yts didn't find one
-            const finalTitle = audioData.title || title;
+            const finalTitle = title || audioData.title || 'Unknown Title';
             const safeTitle = finalTitle.replace(/[^\w\s\-()]/g, '').trim() || 'audio';
 
             // --- Send title/status first ---

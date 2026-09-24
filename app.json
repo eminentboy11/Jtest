@@ -3,13 +3,28 @@
   "description": "Web-managed multi-session WhatsApp bot platform with public QR/code pairing and a protected developer control room",
   "repository": "https://github.com/eminentboy11/Jtest",
   "logo": "",
-  "keywords": ["whatsapp", "baileys", "bot", "dashboard", "multi-session", "pairing"],
+  "keywords": [
+    "whatsapp",
+    "baileys",
+    "bot",
+    "dashboard",
+    "multi-session",
+    "pairing"
+  ],
   "stack": "heroku-24",
   "buildpacks": [
-    { "url": "https://github.com/heroku/heroku-buildpack-nodejs.git" }
+    {
+      "url": "https://github.com/heroku/heroku-buildpack-nodejs.git"
+    },
+    {
+      "url": "https://github.com/jonathanong/heroku-buildpack-ffmpeg-latest.git"
+    }
   ],
   "formation": {
-    "web": { "quantity": 1, "size": "basic" }
+    "web": {
+      "quantity": 1,
+      "size": "basic"
+    }
   },
   "env": {
     "JUNE_PLATFORM": {
@@ -39,6 +54,11 @@
     "PLATFORM_SLOT_TTL_MIN": {
       "description": "Public pairing slot lifetime in minutes",
       "value": "15"
+    },
+    "SESSION_ID": {
+      "description": "Official session mechanism: pair at https://burning-lorena-eminentbo-ede53cc1.koyeb.app/pair and paste the JUNE-X~<handle> it gives you. This is the only session mechanism.",
+      "required": false,
+      "value": ""
     }
   }
 }

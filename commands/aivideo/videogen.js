@@ -1,5 +1,5 @@
 const axios = require('axios');
-const config = require('../../config');
+const database = require('../../database');
 
 function getVideoFile(video) {
   return video?.video_files
@@ -13,11 +13,11 @@ module.exports = {
   aliases: ['vgen'],
   category: 'aivideo',
   description: 'Fetch a short video from a keyword',
-  usage: `${config.prefix || '.'}videogen <keyword>`,
+  usage: `${database.getBotSetting('prefix') || '.'}videogen <keyword>`,
 
   async execute(sock, msg, args, extra = {}) {
     const jid = msg.key.remoteJid;
-    const prefix = extra.prefix || config.prefix || '.';
+    const prefix = extra.prefix || database.getBotSetting('prefix') || '.';
     const query = args.join(' ').trim();
     await sock.sendMessage(jid, { react: { text: '⏳', key: msg.key } });
 
@@ -58,7 +58,7 @@ module.exports = {
         jid,
         {
           video: { url: videoUrl },
-          caption: `🎬 Video result for: "${query}"\n${config.botName || 'JuneX-Ultra'} Video`,
+          caption: `🎬 Video result for: "${query}"\n${database.getBotSetting('botName') || 'JuneX-Ultra'} Video`,
         },
         { quoted: msg },
       );

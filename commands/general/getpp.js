@@ -1,92 +1,116 @@
-// commands/getpp.js
-const {
-  tryFetchProfilePictureUrl,
-  displayUserTag,
-  normalizeJidWithLid,
-  resolvePhone,
-} = require('../../utils/jidHelper');
+const axios = require('axios');
+const { tryFetchProfilePictureUrl, displayUserTag } = require('../../utils/jidHelper');
+
+function toJid(input) {
+  if (!input) return null;
+  let s = String(input).trim();
+  if (s.includes('@')) return s;
+  s = s.replace(/[^0-9]/g, '');
+  if (!s) return null;
+  return `${s}@s.whatsapp.net`;
+}
+
+async function downloadBuffer(url, retries = 3) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      const response = await axios.get(url, {
+        responseType: 'arraybuffer',
+        timeout: 30000,
+        headers: { 'User-Agent': 'WhatsApp/2.24.6.77 A' }
+      });
+      return Buffer.from(response.data);
+    } catch (e) {
+      if (i === retries - 1) throw e;
+      await new Promise(r => setTimeout(r, 1000 * (i + 1)));
+    }
+  }
+}
 
 module.exports = {
   name: 'getpp',
-  aliases: ['profilepic', 'pp', 'pfp'],
+  aliases: ['gp', 'getpic', 'getdp', 'profilepic', 'pp', 'pfp'],
   category: 'general',
-  description: 'Get profile picture of mentioned or quoted user',
-  execute: async (sock, msg, args, extra) => {
-    const { reply, react, from } = extra;
+  description: 'Get profile picture of a user (works in DMs and groups, supports @lid)',
+  usage: '.getpp <phone> | reply | tag | (no arg = your own)',
 
-    const contextInfo =
-      msg.message?.extendedTextMessage?.contextInfo ||
-      msg.message?.imageMessage?.contextInfo ||
-      msg.message?.videoMessage?.contextInfo ||
-      msg.message?.stickerMessage?.contextInfo ||
-      null;
-
-    const quoted   = contextInfo?.participant || contextInfo?.remoteJid || null;
-    const mentioned = contextInfo?.mentionedJid?.[0] || null;
-
-    const targetJid = quoted || mentioned || msg.key.participant || msg.key.remoteJid;
-
-    if (!targetJid) {
-      await react('❌');
-      return reply('❌ Mention or quote a user to get their profile picture.');
-    }
-
-    await react('⏳');
-
+  async execute(sock, msg, args, extra) {
     try {
-      // Fetch group metadata for LID resolution (null if DM)
-      let groupMetadata = null;
-      if (from.endsWith('@g.us')) {
-        try {
-          groupMetadata = await sock.groupMetadata(from);
-        } catch (_) {}
+      let targetUser = null;
+      const ctx = msg.message?.extendedTextMessage?.contextInfo
+                || msg.message?.imageMessage?.contextInfo
+                || msg.message?.videoMessage?.contextInfo
+                || {};
+
+      // 1) Mention / tag
+      if (Array.isArray(ctx.mentionedJid) && ctx.mentionedJid.length) {
+        targetUser = ctx.mentionedJid[0];
       }
 
-      // ── Resolve JID to phone number
-      let resolvedTarget = targetJid;
-      const phone = await resolvePhone(sock, targetJid);
-      if (phone) {
-        resolvedTarget = `${phone}@s.whatsapp.net`;
-      } else {
-        // Normalise LID → PN via mapping files as a secondary fallback
-        resolvedTarget = normalizeJidWithLid(targetJid);
+      // 2) Phone number / JID argument
+      if (!targetUser && args && args.length && args[0] && !args[0].startsWith('@')) {
+        targetUser = toJid(args[0]);
       }
 
-      // ── Fetch profile picture across all JID variants ──────────────────────
-      const { url: ppUrl, jid: resolvedJid } = await tryFetchProfilePictureUrl(
-        sock,
-        resolvedTarget,
-        groupMetadata
-      );
-
-      if (!ppUrl) {
-        await react('❌');
-        return reply(
-          '❌ Could not fetch profile picture. The user may have privacy settings enabled or has no picture set.'
-        );
+      // 3) Reply to a message
+      if (!targetUser && ctx.quotedMessage) {
+        if (ctx.participant) {
+          // Group: participant is the sender of the quoted message
+          targetUser = ctx.participant;
+        } else if (ctx.remoteJid && ctx.remoteJid.endsWith('@s.whatsapp.net')) {
+          // DM: remoteJid is the other person's user JID (not a group)
+          targetUser = ctx.remoteJid;
+        }
       }
 
-      // Prefer phone number for the display tag (antiforeign pattern)
-      const displayTag = phone
-        ? phone
-        : displayUserTag(resolvedJid, groupMetadata);
+      // 4) Default — sender themselves
+      if (!targetUser) {
+        targetUser = extra.sender
+          || msg.key.participant
+          || msg.key.remoteJid;
+      }
 
-      await sock.sendMessage(
-        from,
-        {
-          image: { url: ppUrl },
-          caption: `📸 @${displayTag}`,
-          mentions: [resolvedJid],
-        },
-        { quoted: msg }
-      );
+      if (!targetUser) {
+        return extra.reply('❌ Could not identify target user.\n\nUsage:\n• .getpp 254798570132\n• .getpp @user\n• Reply to a message with .getpp');
+      }
 
-      await react('✅');
-    } catch (err) {
-      await react('❌');
-      await reply(
-        '❌ Could not fetch profile picture. The user may have privacy settings enabled or has no picture set.'
-      );
+      const from = extra.from || msg.key.remoteJid;
+      const groupMeta = extra.groupMetadata || null;
+      const tag = displayUserTag(targetUser, groupMeta);
+
+      let result;
+      try {
+        result = await tryFetchProfilePictureUrl(sock, targetUser, groupMeta);
+      } catch (e) {
+        const code = e?.output?.statusCode;
+        const m = (e?.message || '').toLowerCase();
+        if (code === 401 || m.includes('forbidden') || m.includes('unauthorized')) {
+          return extra.reply(`❌ @${tag}'s profile picture is private.`);
+        }
+        if (code === 404 || code === 500 || m.includes('not found') || m.includes('item-not-found')) {
+          return extra.reply(`❌ No profile picture set for @${tag}.`);
+        }
+        return extra.reply(`❌ Could not fetch profile picture for @${tag}.`);
+      }
+
+      if (!result || !result.url) {
+        return extra.reply(`❌ No profile picture found for @${tag}.`);
+      }
+
+      let buffer;
+      try {
+        buffer = await downloadBuffer(result.url);
+      } catch (dlErr) {
+        return extra.reply(`❌ Failed to download profile picture for @${tag}. Try again later.`);
+      }
+
+      await sock.sendMessage(from, {
+        image: buffer,
+        caption: `👤 Profile picture of @${tag}`,
+        mentions: [targetUser, result.jid].filter((v, i, a) => v && a.indexOf(v) === i),
+      }, { quoted: msg });
+
+    } catch (error) {
+      try { await extra.reply('❌ Profile picture not found for this user.'); } catch (_) {}
     }
   },
 };

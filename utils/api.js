@@ -19,6 +19,8 @@ const DOWNLOAD_HEADERS = {
   }
 };
 
+
+
 // ─── NVIDIA NIM (build.nvidia.com) config ───────────────────────
 const NVIDIA_BASE_URL = 'https://integrate.api.nvidia.com/v1/chat/completions';
 const NVIDIA_DEFAULT_MODEL = 'nvidia/nemotron-nano-12b-v2-vl';
@@ -129,6 +131,57 @@ const APIs = {
     ];
 
     return callNvidia({ messages, model, maxTokens, temperature, timeoutMs });
+  },
+
+  // ─── NVIDIA FLUX image generation (OpenAI-compatible NIM images endpoint) ─
+  // Returns a Buffer (JPEG/PNG) on success, or null on failure.
+  nvidiaImage: async (prompt, opts = {}) => {
+    const { width = 1024, height = 1024, timeoutMs = 120000, model } = opts;
+    try {
+      const resp = await axios.post(
+        'https://ai.api.nvidia.com/v1/genai/black-forest-labs/flux.1-dev',
+        { prompt, width, height },
+        {
+          headers: {
+            Authorization: `Bearer ${getNvidiaApiKey()}`,
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+          },
+          timeout: timeoutMs,
+        }
+      );
+      const artifacts = resp.data?.artifacts || resp.data?.images || resp.data?.data;
+      const first = Array.isArray(artifacts) ? artifacts[0] : artifacts;
+      const b64 = first?.base64 || first?.b64 || resp.data?.b64;
+      if (b64 && typeof b64 === 'string') return Buffer.from(b64, 'base64');
+      // OpenAI-compatible shape: data[0].b64_json
+      const openaiB64 = resp.data?.data?.[0]?.b64_json;
+      if (openaiB64) return Buffer.from(openaiB64, 'base64');
+      // URL result — download it
+      const url = first?.url || first?.image_url || resp.data?.url;
+      if (url && typeof url === 'string') {
+        const img = await axios.get(url, { responseType: 'arraybuffer', timeout: timeoutMs });
+        if (img.data && img.data.length) return Buffer.from(img.data);
+      }
+      return null;
+    } catch (err) {
+      console.error('[NVIDIA FLUX]', err.message);
+      return null;
+    }
+  },
+
+  // ─── Free image fallback (Pollinations — returns raw image bytes, no key) ─
+  pollinationsImage: async (prompt, opts = {}) => {
+    const { width = 1024, height = 1024, timeoutMs = 60000 } = opts;
+    try {
+      const url = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=${width}&height=${height}&nologo=true`;
+      const img = await axios.get(url, { responseType: 'arraybuffer', timeout: timeoutMs });
+      if (img.data && img.data.length) return Buffer.from(img.data);
+      return null;
+    } catch (err) {
+      console.error('[Pollinations]', err.message);
+      return null;
+    }
   },
 
   translate: async (text, to = 'en') => {
@@ -246,12 +299,15 @@ const APIs = {
 
   getIzumiDownloadByUrl: async (youtubeUrl) => {
     const res = await tryRequest(() =>
-      axios.get(`https://apiskeith2-production-3020.up.railway.app/download/audio?url=${encodeURIComponent(youtubeUrl)}`, DOWNLOAD_HEADERS)
+      axios.get(`https://apissupreme.vercel.app/media/ytmp3?apikey=supreme&url=${encodeURIComponent(youtubeUrl)}`, DOWNLOAD_HEADERS)
     );
-    if (res?.data?.status && res?.data?.result) {
+    if (res?.data?.status && res?.data?.downloadUrl) {
       return {
-        download: res.data.result,
-        thumbnail: res.data.result.thumbnail
+        download: res.data.downloadUrl,
+        title: res.data.title,
+        thumbnail: res.data.thumbnail,
+        duration: res.data.duration,
+        source: res.data.source
       };
     }
     throw new Error('no download URL returned');
@@ -412,5 +468,5 @@ const APIs = {
 
 APIs.NVIDIA_DEFAULT_MODEL = NVIDIA_DEFAULT_MODEL;
 APIs.NVIDIA_BASE_URL = NVIDIA_BASE_URL;
-
+APIs.getNvidiaApiKey = getNvidiaApiKey;
 module.exports = APIs;

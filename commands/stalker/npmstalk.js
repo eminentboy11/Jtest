@@ -1,6 +1,6 @@
-const config = require('../../config');
 const APIs = require('../../utils/api');
-const getFooter = () => `Powered by ${config.botName}`;
+const database = require('../../database');
+const getFooter = () => `Powered by ${database.getBotSetting('botName')}`;
 
 module.exports = {
   name: 'npmstalk',
@@ -10,7 +10,7 @@ module.exports = {
 
   async execute(sock, m, args, extra) {
     const jid = m.key.remoteJid;
-    const prefix = config.prefix || '.';
+    const prefix = database.getBotSetting('prefix') || '.';
 
     if (!args || !args[0]) {
       return sock.sendMessage(jid, {
@@ -20,7 +20,7 @@ module.exports = {
           `➥ Usage      ➜ Look up an NPM package\n` +
           `➥ Example    ➜ ${prefix}npmstalk express\n` +
           `➥ Example    ➜ ${prefix}npmstalk gifted-btns\n` +
-          `➥ Powered By ➜ ${config.botName}\n` +
+          `➥ Powered By ➜ ${database.getBotSetting('botName')}\n` +
           `┗━━━━━━━━━━━━━━━━`
       }, { quoted: m });
     }
@@ -55,7 +55,7 @@ module.exports = {
         `\n➥ Created    ➜ ${created}\n` +
         `➥ Updated    ➜ ${modified}\n` +
         `➥ Homepage   ➜ ${homepage}\n` +
-        `➥ Powered By ➜ ${config.botName}\n` +
+        `➥ Powered By ➜ ${database.getBotSetting('botName')}\n` +
         `┗━━━━━━━━━━━━━━━━`;
 
       await sock.sendMessage(jid, { text: caption }, { quoted: m });

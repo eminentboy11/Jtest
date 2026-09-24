@@ -1,7 +1,7 @@
 const axios = require('axios');
-const config = require('../../config');
 const APIs = require('../../utils/api');
-const getFooter = () => `Powered by ${config.botName}`;
+const database = require('../../database');
+const getFooter = () => `Powered by ${database.getBotSetting('botName')}`;
 
 module.exports = {
   name: 'twitterstalk',
@@ -11,7 +11,7 @@ module.exports = {
 
   async execute(sock, m, args, extra) {
     const jid = m.key.remoteJid;
-    const prefix = config.prefix || '.';
+    const prefix = database.getBotSetting('prefix') || '.';
 
     if (!args || !args[0]) {
       return sock.sendMessage(jid, {
@@ -20,7 +20,7 @@ module.exports = {
           `➥ Command    ➜ ${prefix}twitterstalk <username>\n` +
           `➥ Usage      ➜ Stalk a Twitter/X profile\n` +
           `➥ Example    ➜ ${prefix}twitterstalk giftedmauriceke\n` +
-          `➥ Powered By ➜ ${config.botName}\n` +
+          `➥ Powered By ➜ ${database.getBotSetting('botName')}\n` +
           `┗━━━━━━━━━━━━━━━━`
       }, { quoted: m });
     }
@@ -54,7 +54,7 @@ module.exports = {
         `➥ Verified   ➜ ${d.verified ? 'Yes' : 'No'}`;
       if (d.location) caption += `\n➥ Location   ➜ ${d.location}`;
       if (d.website || d.url) caption += `\n➥ Website    ➜ ${d.website || d.url}`;
-      caption += `\n➥ Powered By ➜ ${config.botName}\n┗━━━━━━━━━━━━━━━━`;
+      caption += `\n➥ Powered By ➜ ${database.getBotSetting('botName')}\n┗━━━━━━━━━━━━━━━━`;
 
       if (avatarBuffer) {
         await sock.sendMessage(jid, { image: avatarBuffer, caption }, { quoted: m });

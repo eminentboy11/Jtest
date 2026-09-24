@@ -1,5 +1,5 @@
-const config = require('../../config');
-const getBotName = () => config.botName;
+const database = require('../../database');
+const getBotName = () => database.getBotSetting('botName');
 
 module.exports = {
   name: 'stalkercmd',

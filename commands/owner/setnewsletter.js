@@ -3,9 +3,7 @@
  * Set or change the newsletter JID for menu forwarding
  */
 
-const fs = require('fs');
-const path = require('path');
-const config = require('../../config');
+const database = require('../../database');
 
 module.exports = {
   name: 'setnewsletter',
@@ -60,11 +58,11 @@ module.exports = {
         newsletterJid = args[0].trim();
       } else {
         // Show current status
-        const currentJid = config.newsletterJid || 'Not set';
+        const currentJid = database.getBotSetting('newsletterJid') || 'Not set';
         return extra.reply(
           `📰 *Newsletter Configuration*\n\n` +
           `Current Newsletter JID: \`${currentJid}\`\n` +
-          `Newsletter Name: ${config.botName}\n\n` +
+          `Newsletter Name: ${database.getBotSetting('botName')}\n\n` +
           `Usage:\n` +
           `  .setnewsletter <newsletter JID>\n` +
           `  Or reply to a newsletter message with .setnewsletter\n\n` +
@@ -77,35 +75,15 @@ module.exports = {
         return extra.reply('❌ Invalid newsletter JID format!\n\nNewsletter JID must end with `@newsletter`\nExample: `120363161513685998@newsletter`');
       }
       
-      // Update config.js
-      const configPath = path.join(__dirname, '../../config.js');
-      let configContent = fs.readFileSync(configPath, 'utf8');
-      
-      // Check if newsletterJid already exists in config
-      if (configContent.includes('newsletterJid:')) {
-        // Update existing newsletterJid
-        configContent = configContent.replace(
-          /newsletterJid:\s*['"]([^'"]+)['"]/,
-          `newsletterJid: '${newsletterJid}'`
-        );
-      } else {
-        // Add newsletterJid after sessionName
-        configContent = configContent.replace(
-          /(sessionName:\s*['"][^'"]+['"],)/,
-          `$1\n    newsletterJid: '${newsletterJid}', // Newsletter JID for menu forwarding`
-        );
-      }
-      
-      // Write updated config
-      fs.writeFileSync(configPath, configContent, 'utf8');
-      
+      // Persisted below through the config setter, which writes to SQLite.
+
       // Update in-memory config
-      config.newsletterJid = newsletterJid;
+      database.setBotSetting('newsletterJid', newsletterJid);
       
       await extra.reply(
         `✅ Newsletter JID updated successfully!\n\n` +
         `📰 Newsletter JID: \`${newsletterJid}\`\n` +
-        `📛 Newsletter Name: ${config.botName}\n\n` +
+        `📛 Newsletter Name: ${database.getBotSetting('botName')}\n\n` +
         `The menu will now forward from this newsletter.`
       );
       

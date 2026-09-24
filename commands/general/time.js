@@ -1,4 +1,4 @@
-const config = require('../../config');
+const database = require('../../database');
 
 module.exports = {
   name: 'time',
@@ -9,7 +9,7 @@ module.exports = {
 
   async execute(sock, msg, args, extra) {
     try {
-      const tz = args.join(' ').trim() || config.timezone || 'Asia/Kolkata';
+      const tz = args.join(' ').trim() || database.getTimeZone();
 
       let valid = true;
       try {
@@ -19,7 +19,7 @@ module.exports = {
       }
 
       if (!valid) {
-        return extra.reply(`❌ Invalid timezone: *${tz}*\n\nExample: *${config.prefix}time Africa/Nairobi*`);
+        return extra.reply(`❌ Invalid timezone: *${tz}*\n\nExample: *${database.getBotSetting('prefix')}time Africa/Nairobi*`);
       }
 
       const now = new Date();

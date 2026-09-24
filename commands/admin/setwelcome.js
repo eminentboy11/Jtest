@@ -55,8 +55,7 @@ module.exports = {
 
       // reset to default
       if (input.toLowerCase() === 'reset') {
-        const { defaultGroupSettings } = require(require('path').join(global.__ROOT__, 'config'));
-        db.updateGroupSettings(groupId, { welcomeMessage: defaultGroupSettings.welcomeMessage });
+        db.updateGroupSettings(groupId, { welcomeMessage: db.getDefaultGroupSettings().welcomeMessage });
         return await sock.sendMessage(groupId, {
           text: `✅ Welcome message reset to default.`
         }, { quoted: msg });
@@ -77,7 +76,7 @@ module.exports = {
         .replace(/groupDesc/g, 'Group description here')
         .replace(/time/g, new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }))
         .replace(/#memberCount/g, '?')
-        .replace(/botName/g, require(require('path').join(global.__ROOT__, 'config')).botName);
+        .replace(/botName/g, db.getBotSetting('botName'));
 
       await sock.sendMessage(groupId, {
         text: `✅ *Welcome message updated!*\n\n*Preview:*\n${preview}`,

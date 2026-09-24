@@ -9,11 +9,15 @@ coverage/
 dist/
 build/
 *.log
+npm-debug.log*
+.obfuscate-cache.json
+June x on/
 
 # Runtime WhatsApp authentication and databases
 /session/
 /sessions/
 /database/
+data/
 *.db
 *.db-shm
 *.db-wal
@@ -34,3 +38,7 @@ build/
 Thumbs.db
 .vscode/
 .idea/
+
+# Lockfiles (keep package-lock for reproducibility in Dashboard Edition)
+# yarn.lock is ignored, npm lock kept
+yarn.lock

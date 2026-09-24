@@ -6,10 +6,10 @@
 const axios = require('axios');
 const FormData = require('form-data');
 const { sendButtons } = require('gifted-btns');
-const config = require('../../config');
 
 // Baileys helper
 const { downloadMediaMessage } = require('@whiskeysockets/baileys');
+const database = require('../../database');
 
 module.exports = {
     name: 'catbox',
@@ -116,7 +116,7 @@ module.exports = {
 
             await sendButtons(sock, extra.from, {
                 text: responseText,
-                footer: `> Powered by ${config.botName}`,
+                footer: `> Powered by ${database.getBotSetting('botName')}`,
                 buttons: [
                     {
                         name: 'cta_url',

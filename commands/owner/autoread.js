@@ -1,64 +1,91 @@
-/**
- * Autoread — automatically blue-tick messages
- * Modes: off | pm | group | on (both)
- * Settings persisted in database/bot-settings.json via database.js
- */
 const db = require('../../database');
 
 const KEY = 'autoReadMode';
+const MODES = ['off', 'pm', 'gc', 'all', 'contacts'];
 
-function load() {
-  return { mode: db.getBotSetting(KEY) || 'off' };
+const LABELS = {
+    off: '❌ Auto-read: off',
+    pm: '📩 Auto-read: pm',
+    gc: '💬 Auto-read: gc',
+    all: '✅ Auto-read: all',
+    contacts: '👥 Auto-read: contacts',
+};
+
+const USAGE = 'Usage: .autoread <off|pm|gc|all|contacts>';
+
+function currentMode() {
+    const value = db.getBotSetting(KEY);
+    return MODES.includes(value) ? value : 'off';
 }
 
-function save(data) {
-  db.setBotSetting(KEY, data.mode || 'off');
+function shouldAutoRead(mode, msg, isContact = () => true) {
+    if (!['all', 'contacts', 'pm', 'gc'].includes(mode)) return false;
+    if (!msg || !msg.key || !msg.key.remoteJid) return false;
+    const jid = String(msg.key.remoteJid);
+    if (msg.key.fromMe) return false;
+    if (jid === 'status@broadcast') return false;
+    if (jid.endsWith('@newsletter')) return false;
+    const isPrivate = jid.endsWith('@s.whatsapp.net') || jid.endsWith('@broadcast');
+    const isGroup = jid.endsWith('@g.us');
+    if (mode === 'pm') return isPrivate;
+    if (mode === 'gc') return isGroup;
+    if (mode === 'all') return isPrivate || isGroup;
+    const sender = isGroup ? (msg.key.participant || null) : jid;
+    if (!sender) return false;
+    return Boolean(isContact(sender));
+}
+
+async function readMessageIfEnabled(sock, msg) {
+    try {
+        const mode = currentMode();
+        if (mode === 'off') return false;
+        const contacts = sock?.contacts || {};
+        const isContact = (jid) => {
+            const bare = String(jid || '').split(':')[0];
+            return Boolean(contacts[bare] || contacts[jid]);
+        };
+        if (!shouldAutoRead(mode, msg, isContact)) return false;
+        await sock.readMessages([msg.key]);
+        return true;
+    } catch (_) {
+        return false;
+    }
 }
 
 module.exports = {
-  name: 'autoread',
-  aliases: ['autobluetick', 'autobt', 'autotick'],
-  category: 'owner',
-  description: 'Automatically blue-tick messages',
-  usage: '.autoread <on/off/pm/group>',
-  ownerOnly: true,
+    name: 'autoread',
+    aliases: ['read', 'autoreadmsgs'],
+    category: 'owner',
+    description: 'Auto-read incoming messages (off / pm / gc / all / contacts)',
+    usage: '.autoread <off | pm | gc | all | contacts>',
+    ownerOnly: true,
+    adminOnly: false,
+    groupOnly: false,
+    botAdminOnly: false,
 
-  async execute(sock, msg, args, extra) {
-    const sub     = (args[0] || '').toLowerCase();
-    const current = load().mode;
+    async execute(sock, msg, args, extra) {
+        try {
+            const opt = (args[0] || '').toLowerCase();
 
-    const label = (m) => ({
-      off:   '❌ OFF',
-      pm:    '💬 PM only',
-      group: '👥 Groups only',
-      on:    '✅ ON (PM + Groups)',
-    }[m] || '❌ OFF');
+            if (!opt) {
+                return extra.reply(`${LABELS[currentMode()]}\n${USAGE}`);
+            }
 
-    if (!sub) {
-      return extra.reply(
-        `👁️ *Auto Read (Blue Tick)*\n` +
-        `━━━━━━━━━━━━━━━\n` +
-        `Status: *${label(current)}*\n\n` +
-        `*Options:*\n` +
-        `  .autoread on    — blue-tick all messages\n` +
-        `  .autoread pm    — blue-tick DMs only\n` +
-        `  .autoread group — blue-tick groups only\n` +
-        `  .autoread off   — disable`
-      );
-    }
+            if (!MODES.includes(opt)) {
+                return extra.reply(USAGE);
+            }
 
-    if (!['on', 'off', 'pm', 'group'].includes(sub)) {
-      return extra.reply('⚠️ Usage: .autoread on / off / pm / group');
-    }
+            db.setBotSetting(KEY, opt);
+            if (extra.react) await extra.react(opt === 'off' ? '❌' : '✅').catch(() => {});
+            return extra.reply(LABELS[opt]);
+        } catch (error) {
+            console.error('[autoread]', error.message);
+            if (extra.react) await extra.react('❌').catch(() => {});
+            return extra.reply(`❌ ${error.message}`);
+        }
+    },
 
-    save({ mode: sub });
-
-    // Keep runtime config in sync
-    try {
-      const config = require('../../config');
-      config.autoRead = (sub === 'on' || sub === 'group');
-    } catch (_) {}
-
-    return extra.reply(`👁️ *Auto Read* set to *${label(sub)}*`);
-  }
+    shouldAutoRead,
+    readMessageIfEnabled,
+    currentMode,
 };

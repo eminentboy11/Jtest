@@ -1,7 +1,7 @@
 const axios = require('axios');
-const config = require('../../config');
 const APIs = require('../../utils/api');
-const getFooter = () => `Powered by ${config.botName}`;
+const database = require('../../database');
+const getFooter = () => `Powered by ${database.getBotSetting('botName')}`;
 
 module.exports = {
   name: 'wachannel',
@@ -11,7 +11,7 @@ module.exports = {
 
   async execute(sock, m, args, extra) {
     const jid = m.key.remoteJid;
-    const prefix = config.prefix || '.';
+    const prefix = database.getBotSetting('prefix') || '.';
 
     if (!args || !args[0]) {
       return sock.sendMessage(jid, {
@@ -20,7 +20,7 @@ module.exports = {
           `➥ Command    ➜ ${prefix}wachannel <channel URL>\n` +
           `➥ Usage      ➜ Stalk a WhatsApp channel\n` +
           `➥ Example    ➜ ${prefix}wachannel https://whatsapp.com/channel/...\n` +
-          `➥ Powered By ➜ ${config.botName}\n` +
+          `➥ Powered By ➜ ${database.getBotSetting('botName')}\n` +
           `┗━━━━━━━━━━━━━━━━`
       }, { quoted: m });
     }
@@ -44,7 +44,7 @@ module.exports = {
         `➥ Followers  ➜ ${followers || 'N/A'}\n` +
         `➥ Description ➜ ${description || 'N/A'}\n` +
         `➥ URL        ➜ ${url}\n` +
-        `➥ Powered By ➜ ${config.botName}\n` +
+        `➥ Powered By ➜ ${database.getBotSetting('botName')}\n` +
         `┗━━━━━━━━━━━━━━━━`;
 
       if (profileBuffer) {
