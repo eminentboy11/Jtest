@@ -1,59 +1,14 @@
 {
-  "name": "June X Web \u2014 Independent Dashboard Edition",
-  "description": "Independent web-managed multi-session WhatsApp bot platform (no June X family, no external session server). Public QR/code pairing at / and protected dev room at /dev, fully self-contained.",
+  "name": "JTEST Web Lite — 100+ Bots",
+  "description": "Fully web-based WhatsApp hosting platform — no env sessions, no dev dashboard, file auth, QR/code pairing at /, lite for 100+ bots.",
   "repository": "https://github.com/eminentboy11/Jtest",
-  "logo": "",
-  "keywords": [
-    "whatsapp",
-    "baileys",
-    "bot",
-    "dashboard",
-    "multi-session",
-    "pairing"
-  ],
+  "keywords": ["whatsapp", "baileys", "lite", "web", "multi-session"],
   "stack": "heroku-24",
-  "buildpacks": [
-    {
-      "url": "https://github.com/heroku/heroku-buildpack-nodejs.git"
-    },
-    {
-      "url": "https://github.com/jonathanong/heroku-buildpack-ffmpeg-latest.git"
-    }
-  ],
-  "formation": {
-    "web": {
-      "quantity": 1,
-      "size": "basic"
-    }
-  },
+  "buildpacks": [{ "url": "https://github.com/heroku/heroku-buildpack-nodejs.git" }],
+  "formation": { "web": { "quantity": 1, "size": "basic" } },
   "env": {
-    "JUNE_PLATFORM": {
-      "description": "Enable the Dashboard Edition web platform",
-      "value": "true"
-    },
-    "JUNE_SESSIONS": {
-      "description": "Independent session registry (self-contained, no external server). Example: [{\"sessionId\":\"JTEST~<base64>\",\"phone\":\"2348...\"}] or [] for empty fleet. Each entry auto-boots isolated bot.",
-      "value": "[]"
-    },
-    "ADMIN_PASSWORD": {
-      "description": "Long, unique password for the /dev control room",
-      "required": true
-    },
-    "PLATFORM_MAX_BOTS": {
-      "description": "Shared QR and pairing-code fleet capacity",
-      "value": "30"
-    },
-    "JUNE_MAX_SESSIONS": {
-      "description": "Backward-compatible capacity fallback",
-      "value": "30"
-    },
-    "PLATFORM_CREATES_PER_HOUR": {
-      "description": "Public bot creations allowed per IP each hour",
-      "value": "4"
-    },
-    "PLATFORM_SLOT_TTL_MIN": {
-      "description": "Public pairing slot lifetime in minutes",
-      "value": "15"
-    }
+    "PLATFORM_MAX_BOTS": { "description": "Max bots this instance can host", "value": "100" },
+    "PLATFORM_SLOT_TTL_MIN": { "description": "Pairing slot lifetime minutes", "value": "15" },
+    "PLATFORM_CREATES_PER_HOUR": { "description": "Creations per IP per hour", "value": "10" }
   }
 }

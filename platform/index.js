@@ -1,39 +1,27 @@
 /**
- * June X Platform — bootstrap. attachPlatform(app, server) mounts:
- *   - public pairing gateway routes (/)
- *   - developer control room (/dev, always token-authed)
- *   - one WebSocket server with two client roles:
- *       public: { type:'watch_slot', slotId }  -> that slot's events only
- *       dev:    { type:'auth', token }         -> logs + slot/session events
+ * Web Lite — bootstrap, always web, no dev dashboard, no mode switch.
+ * Mounts public pairing gateway at / and WS for slot watching only.
  */
-
 'use strict';
 
 const express = require('express');
 const { WebSocketServer, WebSocket } = require('ws');
 
 const bridge = require('./bridge');
-const logStore = require('./logStore');
 const slots = require('./slots');
 const registry = require('./registry');
 const sessions = require('./sessions');
 const { router: publicRouter } = require('./publicRoutes');
-const { router: devRouter, checkToken, tokenExpiry } = require('./devRoutes');
 const { configureTrustProxy, resolveUpgradeIp } = require('./clientIp');
 const { positiveInt } = require('./limits');
 
 let activeWss = null;
-const MAX_WS_CONNECTIONS = positiveInt(process.env.PLATFORM_MAX_WS_CONNECTIONS, 150);
-const MAX_WS_PER_IP = positiveInt(process.env.PLATFORM_MAX_WS_PER_IP, 10);
+const MAX_WS_CONNECTIONS = positiveInt(process.env.PLATFORM_MAX_WS_CONNECTIONS, 200);
+const MAX_WS_PER_IP = positiveInt(process.env.PLATFORM_MAX_WS_PER_IP, 20);
 const WS_AUTH_TIMEOUT_MS = positiveInt(process.env.PLATFORM_WS_AUTH_TIMEOUT_SEC, 15) * 1000;
 const wsCountsByIp = new Map();
 
 async function attachPlatform(app, server) {
-    if (!bridge.platformEnabled) {
-        console.log('[ PLATFORM ] Disabled via JUNE_PLATFORM=false — plain multi-session mode.');
-        return null;
-    }
-
     const trustedHops = configureTrustProxy(app);
     console.log(`[ PLATFORM ] Trusted proxy hops: ${trustedHops}`);
     await registry.init();
@@ -41,7 +29,7 @@ async function attachPlatform(app, server) {
     sessions.startGC();
 
     app.disable('x-powered-by');
-    app.use((_req, res, next) => {
+    app.use((_, res, next) => {
         res.set('X-Content-Type-Options', 'nosniff');
         res.set('X-Frame-Options', 'DENY');
         res.set('Referrer-Policy', 'no-referrer');
@@ -61,35 +49,15 @@ async function attachPlatform(app, server) {
     });
     app.use(express.json({ limit: '1mb' }));
     app.use(publicRouter);
-    app.use(devRouter);
 
-    // ── WebSocket ─────────────────────────────────────────────────────────────
     const wss = new WebSocketServer({ server, maxPayload: 512 * 1024 });
     activeWss = wss;
 
-    // Slot events -> the slot's watchers (public) + all dev clients
     slots.subscribe((event) => {
         const msg = JSON.stringify(event);
         for (const client of wss.clients) {
             if (client.readyState !== WebSocket.OPEN) continue;
-            if (client._isDev && !checkToken(client._devToken)) {
-                client.close(4003, 'Developer token expired');
-                continue;
-            }
-            if (client._isDev || client._slotId === event.slotId) client.send(msg);
-        }
-    });
-
-    // Log events -> dev clients only
-    logStore.subscribe((event) => {
-        const msg = JSON.stringify(event);
-        for (const client of wss.clients) {
-            if (client.readyState !== WebSocket.OPEN || !client._isDev) continue;
-            if (!checkToken(client._devToken)) {
-                client.close(4003, 'Developer token expired');
-                continue;
-            }
-            client.send(msg);
+            if (client._slotId === event.slotId) client.send(msg);
         }
     });
 
@@ -101,23 +69,17 @@ async function attachPlatform(app, server) {
             return;
         }
         wsCountsByIp.set(ip, ipCount + 1);
-        ws._isDev = false;
-        ws._devToken = null;
         ws._slotId = null;
         ws._cleaned = false;
 
         const authTimeout = setTimeout(() => {
-            if (!ws._isDev && !ws._slotId && ws.readyState === WebSocket.OPEN) {
-                ws.close(4001, 'Authentication or slot selection required');
+            if (!ws._slotId && ws.readyState === WebSocket.OPEN) {
+                ws.close(4001, 'Slot selection required');
             }
         }, WS_AUTH_TIMEOUT_MS);
         authTimeout.unref?.();
 
         const heartbeat = setInterval(() => {
-            if (ws._isDev && !checkToken(ws._devToken)) {
-                ws.close(4003, 'Developer token expired');
-                return;
-            }
             if (ws._slotId && !slots.get(ws._slotId)) {
                 ws.close(4004, 'Pairing slot expired');
                 return;
@@ -131,15 +93,14 @@ async function attachPlatform(app, server) {
             ws._cleaned = true;
             clearTimeout(authTimeout);
             clearInterval(heartbeat);
-            const count = wsCountsByIp.get(ip) || 0;
-            if (count <= 1) wsCountsByIp.delete(ip);
-            else wsCountsByIp.set(ip, count - 1);
+            const c = wsCountsByIp.get(ip) || 0;
+            if (c <= 1) wsCountsByIp.delete(ip);
+            else wsCountsByIp.set(ip, c - 1);
         };
 
         ws.on('message', (raw) => {
             try {
                 const msg = JSON.parse(raw);
-
                 if (msg?.type === 'watch_slot' && typeof msg.slotId === 'string') {
                     const slot = slots.get(msg.slotId);
                     if (slot) {
@@ -149,21 +110,6 @@ async function attachPlatform(app, server) {
                     } else {
                         ws.send(JSON.stringify({ type: 'error', error: 'Unknown or expired slot.' }));
                     }
-                    return;
-                }
-
-                if (msg?.type === 'auth') {
-                    const expiry = tokenExpiry(msg.token);
-                    if (!expiry) {
-                        ws.send(JSON.stringify({ type: 'error', error: 'Unauthorized or expired token.' }));
-                        ws.close(4003, 'Unauthorized');
-                        return;
-                    }
-                    ws._isDev = true;
-                    ws._devToken = msg.token;
-                    clearTimeout(authTimeout);
-                    ws.send(JSON.stringify({ type: 'auth_ok', expiresAt: expiry }));
-                    ws.send(JSON.stringify({ type: 'log_snapshot', logs: logStore.getLogs(200) }));
                 }
             } catch (_) {
                 if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify({ type: 'error', error: 'Malformed message.' }));
@@ -174,10 +120,7 @@ async function attachPlatform(app, server) {
         ws.on('error', cleanup);
     });
 
-    console.log('[ PLATFORM ] Mounted — public pairing gateway at /  ·  dev control room at /dev');
-    if (!process.env.ADMIN_PASSWORD) {
-        console.log('[ PLATFORM ] ⚠️ ADMIN_PASSWORD is not set — the /dev panel stays locked until you set it in .env');
-    }
+    console.log('[ PLATFORM ] Mounted — public pairing gateway at / (lite, no /dev)');
     return wss;
 }
 
