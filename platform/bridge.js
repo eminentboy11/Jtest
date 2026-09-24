@@ -1,5 +1,5 @@
 /**
- * Web Lite — bridge, always enabled, no env toggle.
+ * Web Lite — pure event bridge, no mode, no toggle, always web.
  * Engine -> platform events: conn-update, pairing-code, pairing-exhausted
  */
 'use strict';
@@ -24,7 +24,6 @@ function emit(event, ...args) {
 }
 
 module.exports = {
-    platformEnabled: true,
     on,
     emitConnUpdate: (bot, update, sock) => emit('conn-update', bot, update, sock),
     emitPairingCode: (bot, code, reservation) => emit('pairing-code', bot, code, reservation),
