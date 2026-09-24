@@ -1,4 +1,4 @@
-const config = require('../../config');
+const database = require('../../database');
 const {
   getInput,
   isHttpUrl,
@@ -13,7 +13,7 @@ module.exports = {
   aliases: ['xvdl', 'xnxx','xvid'],
   category: 'media',
   description: 'Download or search XVideos videos',
-  usage: `${config.prefix || '.'}xvideos <URL or name>`,
+  usage: `${database.getBotSetting('prefix') || '.'}xvideos <URL or name>`,
 
   async execute(sock, msg, args, extra = {}) {
     const jid = msg.key.remoteJid;
@@ -21,7 +21,7 @@ module.exports = {
     if (!input) {
       return sock.sendMessage(
         jid,
-        { text: `Usage: ${extra.prefix || config.prefix || '.'}xvideos <URL or name>` },
+        { text: `Usage: ${extra.prefix || database.getBotSetting('prefix') || '.'}xvideos <URL or name>` },
         { quoted: msg },
       );
     }
@@ -47,7 +47,7 @@ module.exports = {
         jid,
         {
           video,
-          caption: `${title || 'XVideos video'}\n${config.botName || 'JuneX-Ultra'}`,
+          caption: `${title || 'XVideos video'}\n${database.getBotSetting('botName') || 'JuneX-Ultra'}`,
           mimetype: 'video/mp4',
           fileName: safeFileName(title, 'xvideos'),
         },

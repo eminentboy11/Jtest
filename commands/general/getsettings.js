@@ -2,7 +2,6 @@
  * Settings — flat list showing every setting's current live value.
  */
 const { sendButtons } = require('gifted-btns');
-const config   = require('../../config');
 const database = require('../../database');
 
 const on  = '✅ ON';
@@ -20,12 +19,12 @@ module.exports = {
         try {
             const chatId  = extra.from;
             const isGroup = chatId.endsWith('@g.us');
-            const p       = config.prefix || '.';
-            const footer  = `> ᴘᴏᴡᴇʀᴇᴅ ʙʏ ${config.botName}`;
+            const p       = database.getBotSetting('prefix') || '.';
+            const footer  = `> ᴘᴏᴡᴇʀᴇᴅ ʙʏ ${database.getBotSetting('botName')}`;
 
-            const ownerNums   = [].concat(config.ownerNumber || []).map(n => String(n).replace(/\D/g, '')).filter(Boolean);
+            const ownerNums   = [].concat(database.getOwners() || []).map(n => String(n).replace(/\D/g, '')).filter(Boolean);
             const ownerDigits = ownerNums[0] || '';
-            const ownerName   = Array.isArray(config.ownerName) ? config.ownerName[0] : (config.ownerName || 'N/A');
+            const ownerName   = (Array.isArray(database.getOwnerNames()) ? database.getOwnerNames()[0] : database.getOwnerNames()) || ownerDigits || 'N/A';
 
             const buttons = [
                 {
@@ -39,7 +38,7 @@ module.exports = {
                     name: 'cta_url',
                     buttonParamsJson: JSON.stringify({
                         display_text: '🔗 GitHub Repo',
-                        url: config.social?.github || 'https://github.com/Vinpink2/June-X-Ultra'
+                        url: database.SOCIAL?.github || 'https://github.com/Vinpink2/June-X-Ultra'
                     })
                 }
             ];
@@ -103,8 +102,8 @@ module.exports = {
 
                 `🔹 *prefix* : ${p}\n` +
                 `🔹 *owner* : ${ownerName}\n` +
-                `🔹 *timezone* : ${config.timezone || 'Africa/Nairobi'}\n` +
-                `🔹 *botname* : ${config.botName}\n` +
+                `🔹 *timezone* : ${database.getTimeZone()}\n` +
+                `🔹 *botname* : ${database.getBotSetting('botName')}\n` +
                 `🔹 *botmode* : ${botMode}\n` +
                 `🔹 *selfmode* : ${flag(selfMode)}\n` +
                 `🔹 *alwaysonline* : ${flag(alwaysOnline)}\n` +

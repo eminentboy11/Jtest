@@ -1,5 +1,5 @@
 /**
- * Helper Utilities
+ * Helper Utilitie
  */
 
 const axios = require('axios');

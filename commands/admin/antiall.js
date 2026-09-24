@@ -46,10 +46,13 @@ function getStatus(from) {
 }
 
 function setGroupProtectionBundle(from, enabled) {
-  const groupSettings = database.getGroupSettings(from);
-  for (const feature of GROUP_FEATURES) groupSettings[feature.key] = enabled;
+  // Build a patch rather than mutating the merged settings object:
+  // getGroupSettings() layers in the 40-key default template, and writing that
+  // back would persist all of it into this group's row.
+  const patch = {};
+  for (const feature of GROUP_FEATURES) patch[feature.key] = enabled;
 
-  database.updateGroupSettings(from, groupSettings);
+  database.updateGroupSettings(from, patch);
   database.setAntiAllEnabled(from, enabled);
   database.setAntiTagAdminsSettings(from, { enabled });
 }

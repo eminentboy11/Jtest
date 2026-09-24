@@ -1,15 +1,15 @@
-const config = require('../../config');
+const database = require('../../database');
 
 module.exports = {
   name: 'videomenu',
   aliases: ['vidmenu', 'aividmenu', 'videoeffects'],
   description: 'Show AI video effect commands',
   category: 'aivideo',
-  usage: `${config.prefix || '.'}videomenu`,
+  usage: `${database.getBotSetting('prefix') || '.'}videomenu`,
 
   async execute(sock, msg, args, extra = {}) {
     const jid = msg.key.remoteJid;
-    const prefix = extra.prefix || config.prefix || '.';
+    const prefix = extra.prefix || database.getBotSetting('prefix') || '.';
     const commandsText = [
       '🎬 AI video commands',
       '',

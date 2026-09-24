@@ -7,7 +7,7 @@ const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
 const { sendButtons } = require('gifted-btns');
-const config = require('../../config');
+const database = require('../../database');
 
 const RETRY_DELAY = 3000;
 
@@ -73,7 +73,7 @@ async function downloadVideo(videoUrl) {
 }
 
 function getVideoButtons(videoId, dateNow) {
-    const prefix = config.prefix || '.';
+    const prefix = database.getBotSetting('prefix') || '.';
     return [
         { id: `${prefix}video_${videoId}_${dateNow}`,    text: '🎬 Video' },
         { id: `${prefix}videodoc_${videoId}_${dateNow}`, text: '📄 Video Document' },
@@ -127,7 +127,7 @@ module.exports = {
         }
 
         const dateNow = Date.now();
-        const prefix = config.prefix || '.';
+        const prefix = database.getBotSetting('prefix') || '.';
         const originalSender = msg.key.participant || msg.key.remoteJid;
 
         // Step 2: Send format selection buttons
@@ -140,7 +140,7 @@ module.exports = {
                 `⿻ *Channel:* ${video.author?.name || 'N/A'}\n` +
                 `⿻ *Link:* ${video.url}\n\n` +
                 `*Select download format:*`,
-            footer: `Made by ${config.botName}`,
+            footer: `Made by ${database.getBotSetting('botName')}`,
             buttons: getVideoButtons(video.videoId, dateNow),
         }, { quoted: msg });
 
@@ -207,7 +207,7 @@ module.exports = {
                         document: { url: filePath },
                         mimetype: 'video/mp4',
                         fileName: `${cleanTitle}.mp4`,
-                        caption: `🎬 ${title}\n\n> Downloaded via ${config.botName}`,
+                        caption: `🎬 ${title}\n\n> Downloaded via ${database.getBotSetting('botName')}`,
                     }, { quoted: messageData });
                 }
 

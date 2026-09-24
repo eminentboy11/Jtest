@@ -1,8 +1,6 @@
 'use strict';
+const database = require('../../database');
 
-const fs = require('fs');
-const path = require('path');
-const configPath = path.join(__dirname, '../../config.js');
 
 module.exports = {
   name: 'anticallmsg',
@@ -30,23 +28,22 @@ module.exports = {
       );
     }
 
-    const config = require('../../config');
 
     switch (subcommand) {
       case 'set':
-        return handleSet(sock, msg, args, extra, config);
+        return handleSet(sock, msg, args, extra);
       case 'view':
-        return handleView(sock, msg, extra, config);
+        return handleView(sock, msg, extra);
       case 'reset':
         return handleReset(sock, msg, extra);
       case 'off':
         return handleOff(sock, msg, extra);
       case 'presets':
-        return handlePresets(sock, msg, extra, config);
+        return handlePresets(sock, msg, extra);
       case 'preset':
         return handlePreset(sock, msg, args, extra);
       case 'test':
-        return handleTest(sock, msg, extra, config);
+        return handleTest(sock, msg, extra);
       default:
         return extra.reply('❌ Unknown subcommand. Use `.anticallmsg` for help.');
     }
@@ -54,7 +51,7 @@ module.exports = {
 };
 
 // Handle: .anticallmsg set <text>
-async function handleSet(sock, msg, args, extra, config) {
+async function handleSet(sock, msg, args, extra) {
   const customMessage = args.slice(1).join(' ').trim();
 
   if (!customMessage) {
@@ -66,26 +63,9 @@ async function handleSet(sock, msg, args, extra, config) {
   }
 
   try {
-    let configFile = fs.readFileSync(configPath, 'utf8');
-
-    // Update anticallMessage
-    if (configFile.includes('anticallMessage:')) {
-      configFile = configFile.replace(
-        /anticallMessage:\s*null|anticallMessage:\s*['"]([^'"]*)['"]/,
-        `anticallMessage: '${customMessage.replace(/'/g, "\\'")}'`
-      );
-    }
-
-    // Ensure anticallNotify is true
-    if (configFile.includes('anticallNotify:')) {
-      configFile = configFile.replace(
-        /anticallNotify:\s*(true|false)/,
-        'anticallNotify: true'
-      );
-    }
-
-    fs.writeFileSync(configPath, configFile);
-    delete require.cache[require.resolve('../../config')];
+    const database = require('../../database');
+    database.setBotSetting('anticallMessage', customMessage);
+    database.setBotSetting('anticallNotify', true);
 
     return extra.reply(`✅ *Custom message set!*\n\n"${customMessage}"`);
   } catch (err) {
@@ -95,9 +75,9 @@ async function handleSet(sock, msg, args, extra, config) {
 }
 
 // Handle: .anticallmsg view
-async function handleView(sock, msg, extra, config) {
-  const currentMessage = config.defaultGroupSettings.anticallMessage;
-  const isNotifyEnabled = config.defaultGroupSettings.anticallNotify;
+async function handleView(sock, msg, extra) {
+  const currentMessage = database.getDefaultGroupSettings().anticallMessage;
+  const isNotifyEnabled = database.getDefaultGroupSettings().anticallNotify;
 
   if (!isNotifyEnabled) {
     return extra.reply('📵 *Message sending is disabled.*\n\nUse `.anticallmsg reset` to enable.');
@@ -107,7 +87,7 @@ async function handleView(sock, msg, extra, config) {
     return extra.reply(`📝 *Current Custom Message:*\n\n"${currentMessage}"`);
   }
 
-  const defaultPreset = config.anticallPresets[0];
+  const defaultPreset = database.ANTICALL_PRESETS[0];
   return extra.reply(
     `📝 *Current Message (Default Preset):*\n\n` +
     `${defaultPreset.emoji} "${defaultPreset.message}"`
@@ -117,20 +97,9 @@ async function handleView(sock, msg, extra, config) {
 // Handle: .anticallmsg reset
 async function handleReset(sock, msg, extra) {
   try {
-    let configFile = fs.readFileSync(configPath, 'utf8');
-
-    configFile = configFile.replace(
-      /anticallMessage:\s*null|anticallMessage:\s*['"]([^'"]*)['"]/,
-      'anticallMessage: null'
-    );
-
-    configFile = configFile.replace(
-      /anticallNotify:\s*(true|false)/,
-      'anticallNotify: true'
-    );
-
-    fs.writeFileSync(configPath, configFile);
-    delete require.cache[require.resolve('../../config')];
+    const database = require('../../database');
+    database.setBotSetting('anticallMessage', database.BOT_SETTINGS_DEFAULTS.anticallMessage);
+    database.setBotSetting('anticallNotify', database.BOT_SETTINGS_DEFAULTS.anticallNotify);
 
     return extra.reply(
       '✅ *Message reset to default preset.*\n\n' +
@@ -145,15 +114,8 @@ async function handleReset(sock, msg, extra) {
 // Handle: .anticallmsg off
 async function handleOff(sock, msg, extra) {
   try {
-    let configFile = fs.readFileSync(configPath, 'utf8');
-
-    configFile = configFile.replace(
-      /anticallNotify:\s*(true|false)/,
-      'anticallNotify: false'
-    );
-
-    fs.writeFileSync(configPath, configFile);
-    delete require.cache[require.resolve('../../config')];
+    const database = require('../../database');
+    database.setBotSetting('anticallNotify', false);
 
     return extra.reply(
       '✅ *Message sending disabled.*\n\n' +
@@ -166,8 +128,8 @@ async function handleOff(sock, msg, extra) {
 }
 
 // Handle: .anticallmsg presets
-async function handlePresets(sock, msg, extra, config) {
-  const presets = config.anticallPresets;
+async function handlePresets(sock, msg, extra) {
+  const presets = database.ANTICALL_PRESETS;
 
   let presetList = '📋 *Available Presets:*\n\n';
   presets.forEach((preset) => {
@@ -182,8 +144,7 @@ async function handlePresets(sock, msg, extra, config) {
 // Handle: .anticallmsg preset <id>
 async function handlePreset(sock, msg, args, extra) {
   const presetId = parseInt(args[1]);
-  const config = require('../../config');
-  const presets = config.anticallPresets;
+  const presets = database.ANTICALL_PRESETS;
 
   if (!presetId || presetId < 1 || presetId > presets.length) {
     return extra.reply(`❌ Invalid preset ID. Choose 1-${presets.length}.`);
@@ -192,20 +153,9 @@ async function handlePreset(sock, msg, args, extra) {
   const selectedPreset = presets.find((p) => p.id === presetId);
 
   try {
-    let configFile = fs.readFileSync(configPath, 'utf8');
-
-    configFile = configFile.replace(
-      /anticallMessage:\s*null|anticallMessage:\s*['"]([^'"]*)['"]/,
-      `anticallMessage: null`
-    );
-
-    configFile = configFile.replace(
-      /anticallNotify:\s*(true|false)/,
-      'anticallNotify: true'
-    );
-
-    fs.writeFileSync(configPath, configFile);
-    delete require.cache[require.resolve('../../config')];
+    const database = require('../../database');
+    database.setBotSetting('anticallMessage', selectedPreset.message);
+    database.setBotSetting('anticallNotify', true);
 
     return extra.reply(
       `✅ *Preset #${presetId} activated!*\n\n` +
@@ -218,9 +168,9 @@ async function handlePreset(sock, msg, args, extra) {
 }
 
 // Handle: .anticallmsg test
-async function handleTest(sock, msg, extra, config) {
-  const currentMessage = config.defaultGroupSettings.anticallMessage;
-  const isNotifyEnabled = config.defaultGroupSettings.anticallNotify;
+async function handleTest(sock, msg, extra) {
+  const currentMessage = database.getDefaultGroupSettings().anticallMessage;
+  const isNotifyEnabled = database.getDefaultGroupSettings().anticallNotify;
 
   if (!isNotifyEnabled) {
     return extra.reply(
@@ -229,7 +179,7 @@ async function handleTest(sock, msg, extra, config) {
     );
   }
 
-  const testMessage = currentMessage || config.anticallPresets[0].message;
+  const testMessage = currentMessage || database.ANTICALL_PRESETS[0].message;
 
   try {
     await sock.sendMessage(msg.key.remoteJid, {

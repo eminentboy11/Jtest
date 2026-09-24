@@ -22,13 +22,29 @@ function normalizeBotId(value) {
   return normalized || 'june-x-main';
 }
 
+// Remote rows are partitioned by bot_id. Without a per-deployment component
+// every bot writing to the same database shares one namespace — including
+// session_auth_state, so a second bot would restore the first one's WhatsApp
+// session. PN is the documented way for a user to identify their deployment.
+const BOT_ID_PRODUCT = 'june-ultra-main';
+
+function buildBotId(pn, product = BOT_ID_PRODUCT) {
+  const digits = String(pn || '').split('@')[0].split(':')[0].replace(/\D/g, '');
+  return normalizeBotId(digits ? `${product}-${digits}` : product);
+}
+
 function createAdapter(botId) {
-  let activeBotId = normalizeBotId(
-    botId || process.env.JUNE_BOT_ID ||
-    process.env.BOT_ID ||
-    process.env.OWNER_NUMBER ||
-    'june-x-main'
-  );
+  // An explicit botId (every multi-session registry entry) keeps its own
+  // remote namespace. Only the default/legacy adapter derives its id from PN.
+  let activeBotId = botId
+    ? normalizeBotId(botId)
+    : buildBotId(
+        process.env.PN ||
+        process.env.JUNE_PN ||
+        process.env.JUNE_BOT_ID ||
+        process.env.BOT_ID ||
+        process.env.OWNER_NUMBER
+      );
 
   // Connection lifecycle is strictly per adapter/bot. A hot-remove or shutdown
   // of one session must never close another session's MongoDB client.
@@ -39,7 +55,12 @@ function createAdapter(botId) {
   let lastError = null;
 
   function getUri() {
-    return String(process.env.MONGODB_URI || process.env.MONGO_URL || '').trim();
+    return String(
+      process.env.MONGODB_URI ||
+      process.env.MONGODB_URL ||
+      process.env.MONGO_URL ||
+      ''
+    ).trim();
   }
 
   function hasUri() {
@@ -151,7 +172,7 @@ function createAdapter(botId) {
         await ensureIndexes();
         ready = true;
         lastError = null;
-        console.log(`[MONGO] Connected; remote persistence enabled for bot_id=${activeBotId}`);
+        console.log(`[MONGO] Connected; remote persistence enabled for bot_id=${require('../redact').maskBotId(activeBotId)}`);
       } catch (error) {
         lastError = error?.message || String(error);
         console.warn(`[MONGO] Optional MongoDB unavailable: ${lastError}`);
@@ -483,6 +504,7 @@ function createAdapter(botId) {
   }
 
 const api = {
+  buildBotId,
   init,
   close,
   getBotId,

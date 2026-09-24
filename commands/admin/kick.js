@@ -4,7 +4,6 @@
  * Includes robust self-kick prevention for PN/LID IDs
  */
 
-const config = require(require('path').join(global.__ROOT__, 'config'));
 const handler = require(require('path').join(global.__CORE__, 'handler'));
 
 module.exports = {

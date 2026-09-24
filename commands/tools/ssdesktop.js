@@ -4,14 +4,14 @@
  */
 
 const axios = require('axios');
-const config = require('../../config');
+const database = require('../../database');
 
 const API_BASE = 'https://snapshot.xwolf.space/api/capture';
 const VIEWPORTS = ['desktop', 'mobile'];
 
 module.exports = {
     name: 'ssdsktp',
-    aliases: ['screenshot', 'capture', 'ssdesktop'],
+    aliases: ['capture', 'ssdesktop'],
     category: 'tools',
     description: 'Take a screenshot of a website',
     usage: '.ss <url> [desktop | mobile]',
@@ -51,7 +51,7 @@ module.exports = {
             await sock.sendMessage(extra.from, {
                 image: imageBuffer,
                 mimetype: contentType,
-                caption: `📸 *${siteUrl}*\n📱 Viewport: ${viewport}\n\n> ${config.botName}`,
+                caption: `📸 *${siteUrl}*\n📱 Viewport: ${viewport}\n\n> ${database.getBotSetting('botName')}`,
             }, { quoted: msg });
 
             await sock.sendMessage(extra.from, { react: { text: '✅', key: msg.key } });

@@ -7,7 +7,6 @@
  * Bundled images remain application defaults and are never overwritten.
  */
 
-const config = require('../../config');
 const { downloadMediaMessage } = require('@whiskeysockets/baileys');
 const https = require('https');
 const http = require('http');
@@ -68,7 +67,7 @@ module.exports = {
   async execute(sock, msg, args, extra) {
     try {
       const chatId = extra.from;
-      const prefix = config.prefix || '.';
+      const prefix = db.getBotSetting('prefix') || '.';
 
       if (args[0] && args[0].toLowerCase() === 'reset') {
         db.clearMenuImageData();

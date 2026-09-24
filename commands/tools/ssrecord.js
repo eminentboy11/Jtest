@@ -4,7 +4,7 @@
  */
 
 const axios = require('axios');
-const config = require('../../config');
+const database = require('../../database');
 
 const API_BASE = 'https://snapshot.xwolf.space/api/record';
 const VIEWPORTS = ['desktop', 'mobile'];
@@ -53,7 +53,7 @@ module.exports = {
             await sock.sendMessage(extra.from, {
                 video: videoBuffer,
                 mimetype: 'video/webm',
-                caption: `🎥 *${siteUrl}*\n📱 Viewport: ${viewport}\n📦 Size: ${sizeMB} MB\n\n> ${config.botName}`,
+                caption: `🎥 *${siteUrl}*\n📱 Viewport: ${viewport}\n📦 Size: ${sizeMB} MB\n\n> ${database.getBotSetting('botName')}`,
             }, { quoted: msg });
 
             await sock.sendMessage(extra.from, { react: { text: '✅', key: msg.key } });

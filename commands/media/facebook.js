@@ -3,7 +3,7 @@
  */
 
 const axios = require('axios');
-const config = require('../../config');
+const database = require('../../database');
 
 // Store processed message IDs to prevent duplicates
 const processedMessages = new Set();
@@ -61,8 +61,8 @@ module.exports = {
 
                 if (data && data.status && videoUrl) {
                     const caption = data.data.title
-                        ? `${data.data.title}\n\n${config.botName}`
-                        : config.botName;
+                        ? `${data.data.title}\n\n${database.getBotSetting('botName')}`
+                        : database.getBotSetting('botName');
 
                     await sock.sendMessage(chatId, {
                         video: { url: videoUrl },

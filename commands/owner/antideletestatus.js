@@ -12,7 +12,7 @@ const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
 // ── SQLite configuration ─────────────────────────────────────────────────────
 
 const isEnabled = () => database.isAntideleteStatusEnabled();
-const getTimezone = () => database.getBotSetting('timezone') || 'Africa/Nairobi';
+const getTimezone = () => database.getTimeZone();
 
 // ── In-memory status store ────────────────────────────────────────────────────
 // Map<msgId, entry>  — statuses all share jid = 'status@broadcast'

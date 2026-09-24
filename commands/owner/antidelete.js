@@ -23,7 +23,7 @@ let persistenceTimer = null;
 let lastPersistenceErrorAt = 0;
 
 const getMode = () => database.getAntideleteMode();
-const getTimezone = () => database.getBotSetting('timezone') || 'Africa/Nairobi';
+const getTimezone = () => database.getTimeZone();
 
 const MEDIA_MAP = {
   imageMessage: 'image',

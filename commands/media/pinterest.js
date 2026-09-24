@@ -3,14 +3,14 @@
  */
 
 const axios = require('axios');
-const config = require('../../config');
+const database = require('../../database');
 
 // Store processed message IDs to prevent duplicates
 const processedMessages = new Set();
 
 module.exports = {
   name: 'pinterest',
-  aliases: ['pin', 'pindl', 'pinterestdl'],
+  aliases: ['pindl', 'pinterestdl'],
   category: 'media',
   description: 'Download images/videos from Pinterest',
   usage: '.pinterest <Pinterest URL>',
@@ -38,9 +38,9 @@ module.exports = {
         return await extra.reply(
           '📌 *Pinterest Downloader*\n\n' +
           'Download images or videos from Pinterest.\n\n' +
-          `Usage: ${config.prefix}pinterest <Pinterest URL>\n\n` +
+          `Usage: ${database.getBotSetting('prefix')}pinterest <Pinterest URL>\n\n` +
           'Example:\n' +
-          `${config.prefix}pinterest https://in.pinterest.com/pin/1109363320773690068/`
+          `${database.getBotSetting('prefix')}pinterest https://in.pinterest.com/pin/1109363320773690068/`
         );
       }
       
@@ -129,7 +129,7 @@ module.exports = {
       if (author && author !== 'Unknown') {
         caption += `👤 Author: ${author}\n`;
       }
-      caption += `\n*Downloaded by ${config.botName}*`;
+      caption += `\n*Downloaded by ${database.getBotSetting('botName')}*`;
       
       // Send only the main media (not thumbnail separately to avoid duplicates)
       if (isVideo) {

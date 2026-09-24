@@ -11,12 +11,15 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { execSync } = require('child_process');
-const config = require('../../config');
+const database = require('../../database');
 
 let ffmpegPath;
 try { ffmpegPath = require('ffmpeg-static'); } catch { ffmpegPath = 'ffmpeg'; }
 
-const STICKER_AUTHOR = config.stickerAuthor || config.author || config.botName || 'JuneX';
+// Resolved per use, not at module load. loadCommands() requires this file
+// before SQLite is open, so a module-scope const would freeze the value and
+// .setpack author would never take effect until a restart.
+const stickerAuthor = () => database.getBotSetting('stickerAuthor') || database.getBotSetting('author') || database.getBotSetting('botName') || 'JuneX';
 
 async function injectExif(webpBuffer, packname, author) {
   const img = new webp.Image();
@@ -100,7 +103,7 @@ module.exports = [
       };
 
       const packname = msg.pushName || extra.sender.split('@')[0];
-      const author = STICKER_AUTHOR;
+      const author = stickerAuthor();
 
       let inputPath;
       try {

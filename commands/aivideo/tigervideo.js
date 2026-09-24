@@ -1,6 +1,6 @@
 const axios = require('axios');
-const config = require('../../config');
 const { downloadMedia } = require('./ephotoVideo');
+const database = require('../../database');
 
 function extractVideoUrl(html) {
   if (typeof html !== 'string') return null;
@@ -62,11 +62,11 @@ module.exports = {
   aliases: ['tigerlogo', 'tigertext', 'tigervid', 'tigeranimation'],
   category: 'aivideo',
   description: 'Create a digital tiger logo video with your text',
-  usage: `${config.prefix || '.'}tigervideo <text>`,
+  usage: `${database.getBotSetting('prefix') || '.'}tigervideo <text>`,
 
   async execute(sock, msg, args, extra = {}) {
     const jid = msg.key.remoteJid;
-    const prefix = extra.prefix || config.prefix || '.';
+    const prefix = extra.prefix || database.getBotSetting('prefix') || '.';
     await sock.sendMessage(jid, { react: { text: '⏳', key: msg.key } });
 
     try {
@@ -75,7 +75,7 @@ module.exports = {
         return sock.sendMessage(
           jid,
           {
-            text: `🐯 Digital tiger logo video\n\nUsage: ${prefix}tigervideo <text>\nMaximum: 30 characters\nExamples:\n${prefix}tigervideo ${config.botName || 'JUNE-X'}\n${prefix}tigervideo TIGER KING`,
+            text: `🐯 Digital tiger logo video\n\nUsage: ${prefix}tigervideo <text>\nMaximum: 30 characters\nExamples:\n${prefix}tigervideo ${database.getBotSetting('botName') || 'JUNE-X'}\n${prefix}tigervideo TIGER KING`,
           },
           { quoted: msg },
         );

@@ -30,13 +30,13 @@ test('same phone can register four independent sessions with suffixed ids', () =
 });
 
 test('duplicate sessionId is rejected while duplicate phone is allowed', () => {
-  const registry = [{ phone: '2348165321909', sessionId: 'JUNE-MD:~same' }];
+  const registry = [{ phone: '2348165321909', sessionId: 'JUNE-X~abcd' }];
   assert.equal(
     sessionManager.addSessionEntry(registry, { phone: '2348165321909', sessionId: '' }).ok,
     true
   );
   assert.equal(
-    sessionManager.addSessionEntry(registry, { phone: '2348000000000', sessionId: 'JUNE-MD:~same' }).reason,
+    sessionManager.addSessionEntry(registry, { phone: '2348000000000', sessionId: 'JUNE-X~abcd' }).reason,
     'duplicate-sessionId'
   );
 });
@@ -54,7 +54,7 @@ test('suffixed ids target the correct duplicate-phone registry entry', () => {
 });
 
 test('pause and resume preserve the registry entry and do not mutate input', () => {
-  const original = [{ phone: '2348165321909', sessionId: 'JUNE-MD:~abc' }];
+  const original = [{ phone: '2348165321909', sessionId: 'JUNE-X~abcd' }];
   const paused = sessionRegistry.setRegistryPaused(original, '2348165321909', true);
   assert.equal(paused.ok, true);
   assert.equal(paused.registry[0].paused, true);

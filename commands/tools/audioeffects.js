@@ -28,7 +28,7 @@ async function downloadAudio(sock, msg) {
 
 function runFfmpeg(inputPath, outputPath, ffArgs) {
     return new Promise((resolve, reject) => {
-        execFile(ffmpegPath, ['-y', '-i', inputPath, ...ffArgs, outputPath], (err) => {
+        execFile(ffmpegPath(), ['-y', '-i', inputPath, ...ffArgs, outputPath], (err) => {
             try { fs.unlinkSync(inputPath); } catch (_) {}
             if (err) return reject(err);
             resolve();

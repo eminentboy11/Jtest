@@ -9,12 +9,13 @@
 const { igdl } = require('ruhend-scraper');
 const axios = require('axios');
 const { exec } = require('child_process');
+const ffmpegPath = require('../../utils/ffmpegPath');
 const fs = require('fs');
 const path = require('path');
 const webp = require('node-webpmux');
 const crypto = require('crypto');
-const config = require('../../config');
 const { getTempDir, deleteTempFile } = require('../../utils/tempManager');
+const database = require('../../database');
 
 // Function to extract unique media URLs (same as .ig command)
 function extractUniqueMedia(mediaData) {
@@ -127,14 +128,14 @@ async function convertBufferToStickerWebp(inputBuffer, isAnimated, cropSquare) {
       const isLargeVideo = inputBuffer.length > (3 * 1024 * 1024); // >3MB threshold
       // Use max 2 seconds, fps=6, moderate quality
       if (cropSquare) {
-        ffmpegCommand = `ffmpeg -y -i "${tempInput}" -t 2 -vf "crop=min(iw\\,ih):min(iw\\,ih),scale=${size}:${size},fps=6" -c:v libwebp -preset default -loop 0 -vsync 0 -pix_fmt yuva420p -quality 30 -compression_level 6 -b:v 80k -max_muxing_queue_size 1024 "${tempOutput}"`;
+        ffmpegCommand = `"${ffmpegPath()}" -y -i "${tempInput}" -t 2 -vf "crop=min(iw\\,ih):min(iw\\,ih),scale=${size}:${size},fps=6" -c:v libwebp -preset default -loop 0 -vsync 0 -pix_fmt yuva420p -quality 30 -compression_level 6 -b:v 80k -max_muxing_queue_size 1024 "${tempOutput}"`;
       } else {
-        ffmpegCommand = `ffmpeg -y -i "${tempInput}" -t 2 -vf "scale=${size}:${size}:force_original_aspect_ratio=decrease,pad=${size}:${size}:(ow-iw)/2:(oh-ih)/2:color=#00000000,fps=6" -c:v libwebp -preset default -loop 0 -vsync 0 -pix_fmt yuva420p -quality 30 -compression_level 6 -b:v 80k -max_muxing_queue_size 1024 "${tempOutput}"`;
+        ffmpegCommand = `"${ffmpegPath()}" -y -i "${tempInput}" -t 2 -vf "scale=${size}:${size}:force_original_aspect_ratio=decrease,pad=${size}:${size}:(ow-iw)/2:(oh-ih)/2:color=#00000000,fps=6" -c:v libwebp -preset default -loop 0 -vsync 0 -pix_fmt yuva420p -quality 30 -compression_level 6 -b:v 80k -max_muxing_queue_size 1024 "${tempOutput}"`;
       }
     } else {
       // For images – higher quality, larger size
       const vf = `${cropSquare ? vfCropSquareImg : vfPadSquareImg},format=rgba`;
-      ffmpegCommand = `ffmpeg -y -i "${tempInput}" -vf "${vf}" -c:v libwebp -preset default -loop 0 -vsync 0 -pix_fmt yuva420p -quality 70 -compression_level 6 "${tempOutput}"`;
+      ffmpegCommand = `"${ffmpegPath()}" -y -i "${tempInput}" -vf "${vf}" -c:v libwebp -preset default -loop 0 -vsync 0 -pix_fmt yuva420p -quality 70 -compression_level 6 "${tempOutput}"`;
     }
 
     await new Promise((resolve, reject) => {
@@ -170,9 +171,9 @@ async function convertBufferToStickerWebp(inputBuffer, isAnimated, cropSquare) {
           const duration = Math.max(1, 2 - (attempts * 0.2));
           
           if (cropSquare) {
-            harsherCmd = `ffmpeg -y -i "${tempInput}" -t ${duration} -vf "crop=min(iw\\,ih):min(iw\\,ih),scale=${currentSize}:${currentSize},fps=${fps}" -c:v libwebp -preset default -loop 0 -vsync 0 -pix_fmt yuva420p -quality ${quality} -compression_level 6 -b:v ${bitrate}k -max_muxing_queue_size 1024 "${tempOutput2}"`;
+            harsherCmd = `"${ffmpegPath()}" -y -i "${tempInput}" -t ${duration} -vf "crop=min(iw\\,ih):min(iw\\,ih),scale=${currentSize}:${currentSize},fps=${fps}" -c:v libwebp -preset default -loop 0 -vsync 0 -pix_fmt yuva420p -quality ${quality} -compression_level 6 -b:v ${bitrate}k -max_muxing_queue_size 1024 "${tempOutput2}"`;
           } else {
-            harsherCmd = `ffmpeg -y -i "${tempInput}" -t ${duration} -vf "scale=${currentSize}:${currentSize}:force_original_aspect_ratio=decrease,pad=${currentSize}:${currentSize}:(ow-iw)/2:(oh-ih)/2:color=#00000000,fps=${fps}" -c:v libwebp -preset default -loop 0 -vsync 0 -pix_fmt yuva420p -quality ${quality} -compression_level 6 -b:v ${bitrate}k -max_muxing_queue_size 1024 "${tempOutput2}"`;
+            harsherCmd = `"${ffmpegPath()}" -y -i "${tempInput}" -t ${duration} -vf "scale=${currentSize}:${currentSize}:force_original_aspect_ratio=decrease,pad=${currentSize}:${currentSize}:(ow-iw)/2:(oh-ih)/2:color=#00000000,fps=${fps}" -c:v libwebp -preset default -loop 0 -vsync 0 -pix_fmt yuva420p -quality ${quality} -compression_level 6 -b:v ${bitrate}k -max_muxing_queue_size 1024 "${tempOutput2}"`;
           }
         } else {
           // For images: reduce quality and resolution progressively
@@ -180,7 +181,7 @@ async function convertBufferToStickerWebp(inputBuffer, isAnimated, cropSquare) {
           const vf = cropSquare
             ? `crop=min(iw\\,ih):min(iw\\,ih),scale=${currentSize}:${currentSize},format=rgba`
             : `scale=${currentSize}:${currentSize}:force_original_aspect_ratio=decrease,pad=${currentSize}:${currentSize}:(ow-iw)/2:(oh-ih)/2:color=#00000000,format=rgba`;
-          harsherCmd = `ffmpeg -y -i "${tempInput}" -vf "${vf}" -c:v libwebp -preset default -loop 0 -vsync 0 -pix_fmt yuva420p -quality ${quality} -compression_level 6 "${tempOutput2}"`;
+          harsherCmd = `"${ffmpegPath()}" -y -i "${tempInput}" -vf "${vf}" -c:v libwebp -preset default -loop 0 -vsync 0 -pix_fmt yuva420p -quality ${quality} -compression_level 6 "${tempOutput2}"`;
         }
         
         await new Promise((resolve, reject) => {
@@ -203,7 +204,7 @@ async function convertBufferToStickerWebp(inputBuffer, isAnimated, cropSquare) {
 
     const json = {
       'sticker-pack-id': crypto.randomBytes(32).toString('hex'),
-      'sticker-pack-name': config.packname || 'Made by',
+      'sticker-pack-name': database.getBotSetting('packname') || 'Made by',
       'emojis': ['📸']
     };
     const exifAttr = Buffer.from([0x49, 0x49, 0x2A, 0x00, 0x08, 0x00, 0x00, 0x00, 0x01, 0x00, 0x41, 0x57, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x16, 0x00, 0x00, 0x00]);
@@ -374,7 +375,7 @@ async function forceMiniSticker(inputBuffer, isVideo, cropSquare) {
           ? `crop=min(iw\\,ih):min(iw\\,ih),scale=${size}:${size}${isVideo ? ',fps=3' : ''}`
           : `scale=${size}:${size}:force_original_aspect_ratio=decrease,pad=${size}:${size}:(ow-iw)/2:(oh-ih)/2:color=#00000000${isVideo ? ',fps=3' : ''}`;
 
-        const cmd = `ffmpeg -y -i "${tempInput}" ${isVideo ? '-t 0.5' : ''} -vf "${vf}" -c:v libwebp -preset default -loop 0 -pix_fmt yuva420p -quality ${isVideo ? 15 : 30} -compression_level 6 -b:v 30k "${tempOutput}"`;
+        const cmd = `"${ffmpegPath()}" -y -i "${tempInput}" ${isVideo ? '-t 0.5' : ''} -vf "${vf}" -c:v libwebp -preset default -loop 0 -pix_fmt yuva420p -quality ${isVideo ? 15 : 30} -compression_level 6 -b:v 30k "${tempOutput}"`;
         
         await new Promise((resolve, reject) => {
           exec(cmd, (error) => error ? reject(error) : resolve());
@@ -389,7 +390,7 @@ async function forceMiniSticker(inputBuffer, isVideo, cropSquare) {
             await img.load(smallWebp);
             const json = {
               'sticker-pack-id': crypto.randomBytes(32).toString('hex'),
-              'sticker-pack-name': config.packname || 'Made by',
+              'sticker-pack-name': database.getBotSetting('packname') || 'Made by',
               'emojis': ['📸']
             };
             const exifAttr = Buffer.from([0x49, 0x49, 0x2A, 0x00, 0x08, 0x00, 0x00, 0x00, 0x01, 0x00, 0x41, 0x57, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x16, 0x00, 0x00, 0x00]);
@@ -504,7 +505,7 @@ async function igsCommand(sock, msg, args, extra, crop = false) {
             const vfUltra = crop
               ? `crop=min(iw\\,ih):min(iw\\,ih),scale=${ultraSize}:${ultraSize}${isVideo ? ',fps=3' : ''}`
               : `scale=${ultraSize}:${ultraSize}:force_original_aspect_ratio=decrease,pad=${ultraSize}:${ultraSize}:(ow-iw)/2:(oh-ih)/2:color=#00000000${isVideo ? ',fps=3' : ''}`;
-            const ultraCmd = `ffmpeg -y -i "${tempInput2}" ${isVideo ? '-t 0.5' : ''} -vf "${vfUltra}" -c:v libwebp -preset default -loop 0 -vsync 0 -pix_fmt yuva420p -quality ${isVideo ? 12 : 25} -compression_level 6 -b:v 25k -max_muxing_queue_size 1024 "${tempOutputUltra}"`;
+            const ultraCmd = `"${ffmpegPath()}" -y -i "${tempInput2}" ${isVideo ? '-t 0.5' : ''} -vf "${vfUltra}" -c:v libwebp -preset default -loop 0 -vsync 0 -pix_fmt yuva420p -quality ${isVideo ? 12 : 25} -compression_level 6 -b:v 25k -max_muxing_queue_size 1024 "${tempOutputUltra}"`;
             
             await new Promise((resolve, reject) => {
               exec(ultraCmd, (error) => error ? reject(error) : resolve());
@@ -516,7 +517,7 @@ async function igsCommand(sock, msg, args, extra, crop = false) {
               await imgUltra.load(ultraWebp);
               const jsonUltra = {
                 'sticker-pack-id': crypto.randomBytes(32).toString('hex'),
-                'sticker-pack-name': config.packname || 'Made by',
+                'sticker-pack-name': database.getBotSetting('packname') || 'Made by',
                 'emojis': ['📸']
               };
               const exifAttrUltra = Buffer.from([0x49, 0x49, 0x2A, 0x00, 0x08, 0x00, 0x00, 0x00, 0x01, 0x00, 0x41, 0x57, 0x07, 0x00, 0x00, 0x00, 0x00, 0x00, 0x16, 0x00, 0x00, 0x00]);

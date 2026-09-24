@@ -3,8 +3,8 @@
  * Inspect a chat.whatsapp.com link without joining.
  */
 
-const config = require('../../config');
 const { jidUser, resolvePhone, rememberLidMapping } = require('../../utils/jidHelper');
+const database = require('../../database');
 
 function extractInviteCode(input) {
     if (!input) return null;
@@ -84,7 +84,7 @@ module.exports = {
         try {
             if (extra.react) await extra.react('🔎').catch(() => {});
             const info = await sock.groupGetInviteInfo(code);
-            const tz = config.timezone || 'Africa/Lagos';
+            const tz = database.getTimeZone();
 
             const ownerJid = await preferPn(sock, info.owner, info.ownerPn);
             const subjectOwner = await preferPn(sock, info.subjectOwner, info.subjectOwnerPn);

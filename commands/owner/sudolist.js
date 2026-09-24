@@ -1,5 +1,4 @@
 const database = require('../../database');
-const config = require('../../config');
 
 module.exports = {
     name: 'sudolist',

@@ -31,13 +31,81 @@ function normalizeBotId(value) {
   return normalized || 'june-x-main';
 }
 
+// Remote rows are partitioned by bot_id. Without a per-deployment component
+// every bot writing to the same database shares one namespace — including
+// session_auth_state, so a second bot would restore the first one's WhatsApp
+// session. PN is the documented way for a user to identify their deployment.
+//
+// The separator must be '-' or '_': normalizeBotId() splits on ':' and '@' to
+// turn a JID into a bare number, which would silently discard everything after
+// the separator.
+const BOT_ID_PRODUCT = 'june-ultra-main';
+
+function buildBotId(pn, product = BOT_ID_PRODUCT) {
+  // Strip the JID parts before pulling digits, otherwise a device-scoped id
+  // like 2348154853640:12@s.whatsapp.net folds the ":12" into the number.
+  const digits = String(pn || '').split('@')[0].split(':')[0].replace(/\D/g, '');
+  return normalizeBotId(digits ? `${product}-${digits}` : product);
+}
+
+// Users paste provider URLs as-is (Neon, Render, Supabase, Heroku, Railway).
+// Those often include sslmode=require and channel_binding=require. node-pg
+// warns on sslmode=require and does not implement channel_binding, so strip
+// both from the string and apply TLS ourselves. Local URLs stay plaintext
+// unless sslmode is set; sslmode=disable remains an explicit opt-out.
+function normalizePgConfig(connectionString) {
+  const raw = String(connectionString || '').trim();
+  const fallbackSsl = { rejectUnauthorized: false };
+
+  const stripQueryKeys = (value, keys) => {
+    let next = String(value || '');
+    for (const key of keys) {
+      next = next.replace(new RegExp(`([?&])${key}=[^&]*`, 'gi'), '$1');
+    }
+    return next.replace(/[?&]+$/g, '').replace(/\?&/g, '?').replace(/&&+/g, '&');
+  };
+
+  try {
+    const url = new URL(raw);
+    const sslmode = String(url.searchParams.get('sslmode') || '').toLowerCase();
+    const sslFlag = String(url.searchParams.get('ssl') || '').toLowerCase();
+    url.searchParams.delete('sslmode');
+    url.searchParams.delete('channel_binding');
+    url.searchParams.delete('uselibpqcompat');
+    if (sslFlag === 'true' || sslFlag === '1' || sslFlag === 'require') {
+      url.searchParams.delete('ssl');
+    }
+    const isLocal = /^(localhost|127\.0\.0\.1|0\.0\.0\.0|\[::1\])$/i.test(url.hostname);
+    let ssl;
+    if (sslmode === 'disable' || sslFlag === 'false' || sslFlag === '0') ssl = false;
+    else if (sslmode === 'verify-full') ssl = { rejectUnauthorized: true };
+    else if (sslmode || sslFlag === 'true' || sslFlag === '1' || sslFlag === 'require' || !isLocal) ssl = fallbackSsl;
+    return { connectionString: url.toString(), ssl };
+  } catch {
+    const sslmode = /sslmode=([^&]+)/i.exec(raw)?.[1]?.toLowerCase() || '';
+    if (sslmode === 'disable') {
+      return { connectionString: stripQueryKeys(raw, ['sslmode', 'channel_binding', 'uselibpqcompat']), ssl: false };
+    }
+    return {
+      connectionString: stripQueryKeys(raw, ['sslmode', 'channel_binding', 'uselibpqcompat', 'ssl']),
+      ssl: fallbackSsl,
+    };
+  }
+}
+
 function createAdapter(botId) {
-  let activeBotId = normalizeBotId(
-    botId || process.env.JUNE_BOT_ID ||
-    process.env.BOT_ID ||
-    process.env.OWNER_NUMBER ||
-    'june-x-main'
-  );
+  // An explicit botId (every multi-session registry entry) keeps its own
+  // remote namespace. Only the default/legacy adapter derives its id from PN,
+  // the way a single-bot deployment identifies its deployment.
+  let activeBotId = botId
+    ? normalizeBotId(botId)
+    : buildBotId(
+        process.env.PN ||
+        process.env.JUNE_PN ||
+        process.env.JUNE_BOT_ID ||
+        process.env.BOT_ID ||
+        process.env.OWNER_NUMBER
+      );
 
   let pool = null;
   let ready = false;
@@ -46,7 +114,19 @@ function createAdapter(botId) {
   let schemaReady = false;
 
   function hasUrl() {
-    return Boolean(String(process.env.DATABASE_URL || '').trim());
+    return Boolean(getUrl());
+  }
+
+  // Heroku provisions DATABASE_URL, while the project documentation and local
+  // .env template use POSTGRESQL_URL. Accept both so remote persistence is not
+  // accidentally disabled after a dyno restart.
+  function getUrl() {
+    return String(
+      process.env.DATABASE_URL ||
+      process.env.POSTGRESQL_URL ||
+      process.env.POSTGRES_URL ||
+      ''
+    ).trim();
   }
 
   function getBotId() {
@@ -91,19 +171,26 @@ function createAdapter(botId) {
         return getStatus();
       }
 
+      const connectionString = getUrl();
+      const pgConfig = normalizePgConfig(connectionString);
+
       const nextPool = new Pool({
-        connectionString: process.env.DATABASE_URL,
+        connectionString: pgConfig.connectionString,
         max: Number(process.env.JUNE_PG_POOL_MAX) || 5,
         idleTimeoutMillis: Number(process.env.JUNE_PG_IDLE_TIMEOUT_MS) || 30000,
         connectionTimeoutMillis: Number(process.env.JUNE_PG_CONNECTION_TIMEOUT_MS) || 5000,
-        ssl: /sslmode=require/i.test(process.env.DATABASE_URL)
-          ? { rejectUnauthorized: false }
-          : undefined,
+        ssl: pgConfig.ssl,
       });
 
       nextPool.on('error', (error) => {
         lastError = error.message;
-        console.warn(`[PG] Pool error: ${error.message}`);
+        // A dead database fires this on every failed operation — log it at most
+        // once every 5 minutes so the console never floods.
+        const now = Date.now();
+        if (now - (nextPool._lastErrorLog || 0) >= 5 * 60 * 1000) {
+          nextPool._lastErrorLog = now;
+          console.warn(`[PG] Pool error: ${error.message}`);
+        }
       });
 
       try {
@@ -113,10 +200,18 @@ function createAdapter(botId) {
         ready = true;
         schemaReady = true;
         lastError = null;
-        console.log(`[PG] Connected; remote persistence enabled for bot_id=${activeBotId}`);
+        console.log(`[PG] Connected; remote persistence enabled for bot_id=${require('../redact').maskBotId(activeBotId)}`);
       } catch (error) {
         lastError = error.message;
         console.warn(`[PG] Optional PostgreSQL unavailable: ${error.message}`);
+        // The driver's own wording says nothing about what to change.
+        if (/SSL|TLS/i.test(error.message)) {
+          console.warn('[PG] The server requires TLS. Paste the provider URL as-is; June enables TLS for remote hosts automatically.');
+        } else if (/password|authentication|role .* does not exist/i.test(error.message)) {
+          console.warn('[PG] Check the username and password in DATABASE_URL.');
+        } else if (/ENOTFOUND|EAI_AGAIN|ETIMEDOUT|ECONNREFUSED/i.test(error.message)) {
+          console.warn('[PG] Host unreachable — check the hostname, port, and that the database is awake.');
+        }
         try { await nextPool.end(); } catch (_) {}
       }
 
@@ -580,6 +675,7 @@ function createAdapter(botId) {
   }
 
 const api = {
+  buildBotId,
   init,
   query,
   close,

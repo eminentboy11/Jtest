@@ -1,7 +1,7 @@
 const axios = require('axios');
-const config = require('../../config');
 const APIs = require('../../utils/api');
-const getFooter = () => `Powered by ${config.botName}`;
+const database = require('../../database');
+const getFooter = () => `Powered by ${database.getBotSetting('botName')}`;
 
 module.exports = {
     name: 'tiktokstalk',
@@ -11,7 +11,7 @@ module.exports = {
 
     async execute(sock, m, args, extra) {
         const jid = m.key.remoteJid;
-        const prefix = config.prefix || '.';
+        const prefix = database.getBotSetting('prefix') || '.';
 
         if (!args || !args[0]) {
             return sock.sendMessage(jid, {
@@ -20,7 +20,7 @@ module.exports = {
                     `➥ Command    ➜ ${prefix}tiktokstalk <username>\n` +
                     `➥ Usage      ➜ Stalk a TikTok profile\n` +
                     `➥ Example    ➜ ${prefix}tiktokstalk tiktokuser\n` +
-                    `➥ Powered By ➜ ${config.botName}\n` +
+                    `➥ Powered By ➜ ${database.getBotSetting('botName')}\n` +
                     `┗━━━━━━━━━━━━━━━━`
             }, { quoted: m });
         }
@@ -52,7 +52,7 @@ module.exports = {
             lines.push(`➥ Verified   ➜ ${d.verified ? 'Yes ✔️' : 'No'}`);
             lines.push(`➥ Private    ➜ ${d.private ? 'Yes' : 'No'}`);
             if (d.profileUrl) lines.push(`➥ Profile    ➜ ${d.profileUrl}`);
-            lines.push(`➥ Powered By ➜ ${config.botName}`, `┗━━━━━━━━━━━━━━━━`);
+            lines.push(`➥ Powered By ➜ ${database.getBotSetting('botName')}`, `┗━━━━━━━━━━━━━━━━`);
 
             const caption = lines.join('\n');
 

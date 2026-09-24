@@ -3,7 +3,6 @@
  */
 
 const os = require('os');
-const config = require('../../config');
 
 /**
  * Detect the platform where the bot is running

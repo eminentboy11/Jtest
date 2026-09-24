@@ -1,5 +1,5 @@
-const config = require('../../config');
 const { generateEphoto, downloadMedia, sendGeneratedMedia } = require('./ephotoVideo');
+const database = require('../../database');
 
 const EFFECT_URLS = [
   'https://en.ephoto360.com/lightning-pubg-video-logo-maker-online-615.html',
@@ -13,11 +13,11 @@ module.exports = {
   aliases: ['pubgvideo', 'pubglightning', 'pubglogo', 'pubgintro', 'lightningpubgvideo'],
   category: 'aivideo',
   description: 'Create a lightning PUBG video logo with your text',
-  usage: `${config.prefix || '.'}lightningpubg <text>`,
+  usage: `${database.getBotSetting('prefix') || '.'}lightningpubg <text>`,
 
   async execute(sock, msg, args, extra = {}) {
     const jid = msg.key.remoteJid;
-    const prefix = extra.prefix || config.prefix || '.';
+    const prefix = extra.prefix || database.getBotSetting('prefix') || '.';
     await sock.sendMessage(jid, { react: { text: '⏳', key: msg.key } });
 
     try {
@@ -26,7 +26,7 @@ module.exports = {
         return sock.sendMessage(
           jid,
           {
-            text: `⚡ Lightning PUBG video\n\nUsage: ${prefix}lightningpubg <text>\nMaximum: 25 characters\nExample: ${prefix}lightningpubg ${config.botName || 'JUNE-X'}`,
+            text: `⚡ Lightning PUBG video\n\nUsage: ${prefix}lightningpubg <text>\nMaximum: 25 characters\nExample: ${prefix}lightningpubg ${database.getBotSetting('botName') || 'JUNE-X'}`,
           },
           { quoted: msg },
         );

@@ -5,11 +5,11 @@ const crypto     = require('crypto');
 const { spawn }  = require('child_process');
 const webp       = require('node-webpmux');
 const ffmpegPath = require('../../utils/ffmpegPath');
-const config     = require('../../config');
 const { getTempDir, deleteTempFile } = require('../../utils/tempManager');
+const database = require('../../database');
 
 const PACK_SIZE  = 59;
-const TG_TOKEN   = process.env.TELEGRAM_BOT_TOKEN || config.telegramToken || '';
+const TG_TOKEN   = process.env.TELEGRAM_BOT_TOKEN || '';
 const delay = ms => new Promise(r => setTimeout(r, ms));
 
 async function fetchBuffer(url) {
@@ -37,7 +37,7 @@ async function toWebp(inputPath, outputPath, isAnimated) {
           ];
 
     await new Promise((resolve, reject) => {
-        const ff = spawn(ffmpegPath, args);
+        const ff = spawn(ffmpegPath(), args);
         const errs = [];
         ff.stderr.on('data', d => errs.push(d));
         ff.on('error', reject);
@@ -101,10 +101,6 @@ module.exports = {
                 `Use a Telegram sticker pack link:\n` +
                 `_https://t.me/addstickers/PackName_`
             );
-        }
-
-        if (!TG_TOKEN) {
-            return reply('❌ Telegram sticker support is not configured. Set TELEGRAM_BOT_TOKEN on the server.');
         }
 
         const packName = url.replace(/https?:\/\/t\.me\/addstickers\//i, '').split('/')[0].trim();
@@ -241,7 +237,7 @@ module.exports = {
             `📊 Sent: *${totalSent}/${total}* across *${totalPacks}* pack${totalPacks > 1 ? 's' : ''}\n` +
             (skipped ? `⏭ Skipped (Lottie): ${skipped}\n` : '') +
             (failed  ? `❌ Failed: ${failed}\n`             : '') +
-            `\n> Powered by ${config.botName || 'JuneX-Ultra'}`
+            `\n> Powered by ${database.getBotSetting('botName') || 'JuneX-Ultra'}`
         );
     }
 };

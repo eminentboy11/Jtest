@@ -1,9 +1,9 @@
 const axios  = require('axios');
 const yts    = require('yt-search');
-const config = require('../../config');
 const fs     = require('fs');
 const path   = require('path');
 const os     = require('os');
+const database = require('../../database');
 
 module.exports = {
     name: 'video3',
@@ -18,7 +18,7 @@ module.exports = {
         const query  = args.join(' ').trim();
 
         if (!query) {
-            return extra.reply(`Usage: ${config.prefix || '.'}video3 <youtube url or search>`);
+            return extra.reply(`Usage: ${database.getBotSetting('prefix') || '.'}video3 <youtube url or search>`);
         }
 
         await extra.react('⏳');

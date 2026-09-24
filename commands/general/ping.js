@@ -1,6 +1,6 @@
 /* by supreme */
-const config = require('../../config');
 const { applyFont } = require('../../utils/fontConverter');
+const database = require('../../database');
 
 module.exports = {
     name: 'ping',
@@ -12,7 +12,7 @@ module.exports = {
     async execute(sock, msg, args, extra) {
         try {
             const chatId = extra.from;
-            const botName = config.botName || 'June-Ultra';
+            const botName = database.getBotSetting('botName') || 'June-Ultra';
 
             const start = performance.now();
             const sentMsg = await sock.sendMessage(chatId, {

@@ -1,6 +1,6 @@
 const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
 const { sendButtons } = require('gifted-btns');
-const config = require('../../config');
+const database = require('../../database');
 
 const STATUS_JID = 'status@broadcast';
 
@@ -49,7 +49,7 @@ async function extractMedia(content) {
  */
 function getStatusJidList(sock) {
     const jids = new Set();
-    const owners = [].concat(config.ownerNumber || []);
+    const owners = [].concat(database.getOwners() || []);
     for (const num of owners) {
         const clean = String(num).replace(/\D/g, '');
         if (clean) jids.add(`${clean}@s.whatsapp.net`);
@@ -89,7 +89,7 @@ module.exports = {
     async execute(sock, msg, args, extra) {
         try {
             const chatId  = extra.from;
-            const footer  = `> Powered by ${config.botName}`;
+            const footer  = `> Powered by ${database.getBotSetting('botName')}`;
             const caption = args.join(' ').trim();
 
             // Resolve media from quoted message or direct attachment
@@ -104,10 +104,10 @@ module.exports = {
             if (!media && !caption) {
                 return extra.reply(
                     `📖 *tostatus — Post to WhatsApp Status*\n\n` +
-                    `*Text story:*\n  ${config.prefix}tostatus Hello World!\n\n` +
-                    `*Image story:*\n  Reply to an image with ${config.prefix}tostatus [caption]\n\n` +
-                    `*Video story:*\n  Reply to a video with ${config.prefix}tostatus [caption]\n\n` +
-                    `_Aliases: ${config.prefix}tst · ${config.prefix}tostory · ${config.prefix}poststatus_`
+                    `*Text story:*\n  ${database.getBotSetting('prefix')}tostatus Hello World!\n\n` +
+                    `*Image story:*\n  Reply to an image with ${database.getBotSetting('prefix')}tostatus [caption]\n\n` +
+                    `*Video story:*\n  Reply to a video with ${database.getBotSetting('prefix')}tostatus [caption]\n\n` +
+                    `_Aliases: ${database.getBotSetting('prefix')}tst · ${database.getBotSetting('prefix')}tostory · ${database.getBotSetting('prefix')}poststatus_`
                 );
             }
 

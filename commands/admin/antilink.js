@@ -1,5 +1,4 @@
 const database = require(require('path').join(global.__CORE__, 'database'));
-const config   = require(require('path').join(global.__ROOT__, 'config'));
 
 module.exports = {
     name: 'antilink',
@@ -24,7 +23,7 @@ module.exports = {
                 const actionLabel = {
                     delete: '🗑️ Delete message',
                     kick:   '👢 Delete + kick sender',
-                    warn:   `⚠️ Delete + warn (kick at ${config.maxWarnings || 3} warns)`,
+                    warn:   `⚠️ Delete + warn (kick at ${database.getBotSetting('maxWarnings') || 3} warns)`,
                 }[action] || action;
 
                 return reply(
@@ -56,7 +55,7 @@ module.exports = {
                 const label = {
                     delete: '🗑️ delete the message',
                     kick:   '👢 delete + kick sender',
-                    warn:   `⚠️ delete + warn sender (kick at ${config.maxWarnings || 3} warnings)`,
+                    warn:   `⚠️ delete + warn sender (kick at ${database.getBotSetting('maxWarnings') || 3} warnings)`,
                 }[sub];
                 await react('✅');
                 return reply(`🔗 *Antilink ON* ✅\nAction: *${label}*`);

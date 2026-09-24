@@ -1,10 +1,10 @@
+const database = require('../../database');
 /**
  * Invite Command
  * Sends the current group's invite link to a phone number via DM.
  * Usage: .invite 254798952773
  */
 
-const config = require('../../config');
 
 module.exports = {
   name: 'invite',
@@ -22,7 +22,7 @@ module.exports = {
     }
 
     if (!args[0]) {
-      return reply(`❌ *Usage:* ${config.prefix}invite <number>\n\nExample: ${config.prefix}invite 254798952773`);
+      return reply(`❌ *Usage:* ${database.getBotSetting('prefix')}invite <number>\n\nExample: ${database.getBotSetting('prefix')}invite 254798952773`);
     }
 
     const number = args[0].replace(/\D/g, '');
@@ -46,7 +46,7 @@ module.exports = {
         text:
           `👋 You've been invited to join *${groupName}*!\n\n` +
           `🔗 *Group Link:*\n${link}\n\n` +
-          `> Sent via ${config.botName || 'June-X Ultra'}`
+          `> Sent via ${database.getBotSetting('botName') || 'June-X Ultra'}`
       });
 
       await react('✅');

@@ -1,8 +1,8 @@
 const { createCanvas } = require('@napi-rs/canvas');
-const config = require('../../config');
+const database = require('../../database');
 
 function getBotName() {
-  return config.botName || 'JuneX-Ultra';
+  return database.getBotSetting('botName') || 'JuneX-Ultra';
 }
 
 function getFooter() {
@@ -37,7 +37,7 @@ function addWatermark(ctx, width, height, text = getBotName()) {
 //     try {
 //       if (args.length === 0) {
 //         await sock.sendMessage(jid, { 
-//           text: `🔥 *Fire Logo*\n\nUsage: ${config.prefix}firelogo <text>\n\n*Example:*\n${config.prefix}firelogo WOLF\n${config.prefix}firelogo HELLO WORLD` 
+//           text: `🔥 *Fire Logo*\n\nUsage: ${database.getBotSetting('prefix')}firelogo <text>\n\n*Example:*\n${database.getBotSetting('prefix')}firelogo WOLF\n${database.getBotSetting('prefix')}firelogo HELLO WORLD` 
 //         }, { quoted: m });
 //         return;
 //       }
@@ -269,7 +269,7 @@ module.exports = {
     try {
       if (!args.length) {
         await sock.sendMessage(jid, { 
-          text: `🔥 *Fire Logo*\nUsage: ${config.prefix}firelogo <text>\nExample:\n${config.prefix}firelogo WOLF` 
+          text: `🔥 *Fire Logo*\nUsage: ${database.getBotSetting('prefix')}firelogo <text>\nExample:\n${database.getBotSetting('prefix')}firelogo WOLF` 
         }, { quoted: m });
         return;
       }

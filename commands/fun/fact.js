@@ -2,7 +2,7 @@ const axios = require('axios');
 
 module.exports = {
   name: 'fact',
-  aliases: ['quote', 'randomfact'],
+  aliases: ['randomfact'],
   category: 'fun',
   description: 'Get a random fact or quote',
   usage: '.fact',

@@ -1,5 +1,4 @@
 const os = require('os');
-const config = require('../../config');
 const database = require('../../database');
 const { loadCommands } = require('../../utils/commandLoader');
 const { sendButtons }  = require('gifted-btns');
@@ -109,7 +108,7 @@ module.exports = {
 
     async execute(sock, msg, args, extra) {
         const chatId  = extra.from;
-        const prefix  = config.prefix || '.';
+        const prefix  = database.getBotSetting('prefix') || '.';
         const uptime  = Date.now() - botStartTime;
         const mem     = process.memoryUsage();
         const cpus    = os.cpus();
@@ -120,18 +119,18 @@ module.exports = {
         let cmdCount = 0;
         try { cmdCount = loadCommands().size; } catch (_) {}
 
-        const ownerNames = Array.isArray(config.ownerName)
-            ? config.ownerName.join(', ')
-            : config.ownerName;
+        const ownerNames = Array.isArray(database.getOwnerNames())
+            ? database.getOwnerNames().join(', ')
+            : database.getOwnerNames();
 
         const text = applyFont(
             `┏━━『 BOT INFORMATION 』━━\n\n` +
 
-            `➥ Bot Name  ➜ ${config.botName}\n` +
+            `➥ Bot Name  ➜ ${database.getBotSetting('botName')}\n` +
             `➥ Prefix    ➜ ${prefix}\n` +
             `➥ Owner     ➜ ${ownerNames}\n` +
             `➥ Commands  ➜ ${cmdCount}\n` +
-            `➥ Version   ➜ v${config.version || '1.0.0'}\n` +
+            `➥ Version   ➜ v${database.VERSION || '1.0.0'}\n` +
             `➥ Node.js   ➜ ${process.version}\n\n` +
 
             `┃ System\n` +
@@ -162,7 +161,7 @@ module.exports = {
         await sendButtons(sock, chatId, {
             title:  '',
             text,
-            footer: `> Powered by ${config.botName}`,
+            footer: `> Powered by ${database.getBotSetting('botName')}`,
             buttons: [
                 { id: `${prefix}ping`,    text: '🏓 Ping' },
                 { id: `${prefix}uptime`,  text: '⏱️ Uptime' },

@@ -3,7 +3,7 @@
  */
 
 const { igdl } = require('ruhend-scraper');
-const config = require('../../config');
+const database = require('../../database');
 
 // Store processed message IDs to prevent duplicates
 const processedMessages = new Set();
@@ -121,12 +121,12 @@ module.exports = {
             await sock.sendMessage(chatId, {
               video: { url: mediaUrl },
               mimetype: 'video/mp4',
-              caption: `*DOWNLOADED BY ${config.botName.toUpperCase()}*`
+              caption: `*DOWNLOADED BY ${database.getBotSetting('botName').toUpperCase()}*`
             }, { quoted: msg });
           } else {
             await sock.sendMessage(chatId, {
               image: { url: mediaUrl },
-              caption: `*DOWNLOADED BY ${config.botName.toUpperCase()}*`
+              caption: `*DOWNLOADED BY ${database.getBotSetting('botName').toUpperCase()}*`
             }, { quoted: msg });
           }
           

@@ -4,7 +4,7 @@
 
 const axios = require('axios');
 const cheerio = require('cheerio');
-const config = require('../../config');
+const database = require('../../database');
 
 async function ephoto(url, text) {
     let form = new FormData();
@@ -61,7 +61,7 @@ function makeEphotoCmd(name, aliases, url, description) {
             const { from, reply } = extra || {};
             const chatId = from || msg.key.remoteJid;
             const text = args.join(' ');
-            const prefix = config.prefix || '.';
+            const prefix = database.getBotSetting('prefix') || '.';
             if (!text) {
                 const replyFn = reply || ((t) => sock.sendMessage(chatId, { text: t }, { quoted: msg }));
                 return replyFn(`*Example: ${prefix}${name} vin*`);
@@ -70,7 +70,7 @@ function makeEphotoCmd(name, aliases, url, description) {
                 const result = await ephoto(url, text);
                 await sock.sendMessage(chatId, {
                     image: { url: result },
-                    caption: config.botName,
+                    caption: database.getBotSetting('botName'),
                 }, { quoted: msg });
             } catch (err) {
                 console.error(`Error in ${name} command:`, err);
@@ -92,7 +92,7 @@ function makeApiCmd(name, aliases, buildUrl, description, waitMsg) {
             const { from, reply } = extra || {};
             const chatId = from || msg.key.remoteJid;
             const text = args.join(' ');
-            const prefix = config.prefix || '.';
+            const prefix = database.getBotSetting('prefix') || '.';
             const replyFn = reply || ((t) => sock.sendMessage(chatId, { text: t }, { quoted: msg }));
             if (!text) return replyFn(`*Example: ${prefix}${name} vin*`);
             try {
@@ -100,7 +100,7 @@ function makeApiCmd(name, aliases, buildUrl, description, waitMsg) {
                 const apiUrl = buildUrl(encodeURIComponent(text));
                 await sock.sendMessage(chatId, {
                     image: { url: apiUrl },
-                    caption: config.botName,
+                    caption: database.getBotSetting('botName'),
                 }, { quoted: msg });
             } catch (err) {
                 console.error(`Error in ${name} command:`, err);

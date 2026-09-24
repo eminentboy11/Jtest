@@ -8,7 +8,7 @@
 const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
-const config = require('../../config');
+const database = require('../../database');
 
 const RETRY_DELAY = 3000;
 const MAX_RESULTS = 5;
@@ -205,7 +205,7 @@ module.exports = {
                     document: { url: filePath },
                     mimetype: 'audio/mpeg',
                     fileName: `${cleanTitle}.mp3`,
-                    caption:  `> ${config.botName}`,
+                    caption:  `> ${database.getBotSetting('botName')}`,
                 }, { quoted: messageData });
 
                 if (fs.existsSync(filePath)) fs.unlinkSync(filePath);

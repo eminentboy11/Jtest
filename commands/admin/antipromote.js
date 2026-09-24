@@ -8,7 +8,6 @@
  */
 
 const database = require(require('path').join(global.__CORE__, 'database'));
-const config   = require(require('path').join(global.__ROOT__, 'config'));
 
 // Guard — prevents echo loop when the bot itself makes changes
 const botCorrecting = new Set();
@@ -45,7 +44,7 @@ async function handlePromote(sock, groupId, actor, promotedJid) {
         const actorNum  = actor       ? actor.split('@')[0]       : 'Unknown';
         const targetNum = promotedJid ? promotedJid.split('@')[0] : 'Unknown';
         const timestamp = new Date().toLocaleString('en-GB', {
-            timeZone: config.timezone || 'Africa/Nairobi',
+            timeZone: database.getTimeZone(),
             hour12: false, day: '2-digit', month: '2-digit',
             year: 'numeric', hour: '2-digit', minute: '2-digit'
         });
@@ -85,7 +84,7 @@ async function handlePromote(sock, groupId, actor, promotedJid) {
                 `⏰ *Time:* ${timestamp}`,
                 `${actionLine}`,
                 ``,
-                `> Powered by ${config.botName}`
+                `> Powered by ${database.getBotSetting('botName')}`
             ].join('\n'),
             mentions: [actor, promotedJid].filter(Boolean)
         });

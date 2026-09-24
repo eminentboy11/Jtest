@@ -18,7 +18,7 @@ const axios = require('axios');
 const fs = require('fs');
 const path = require('path');
 const { sendButtons } = require('gifted-btns');
-const config = require('../../config');
+const database = require('../../database');
 
 const RETRY_DELAY = 3000;
 const BASE = 'https://api.hostify.indevs.in';
@@ -95,7 +95,7 @@ async function fetchTwitterMedia(twitterUrl) {
  * ID: <prefix>tw_item_<index>_<dateNow>
  */
 function getItemButtons(results, dateNow) {
-    const prefix = config.prefix || '.';
+    const prefix = database.getBotSetting('prefix') || '.';
     return results.map((item, i) => ({
         id:   `${prefix}tw_item_${i}_${dateNow}`,
         text: `${item.type === 'video' ? '🎬' : '🖼️'} ${item.type === 'video' ? 'Video' : 'Image'} #${item.id}`,
@@ -107,7 +107,7 @@ function getItemButtons(results, dateNow) {
  * ID: <prefix>tw_vfmt_<format>_<index>_<dateNow>
  */
 function getVideoFormatButtons(index, dateNow) {
-    const prefix = config.prefix || '.';
+    const prefix = database.getBotSetting('prefix') || '.';
     return [
         { id: `${prefix}tw_vfmt_video_${index}_${dateNow}`,    text: '🎬 Video' },
         { id: `${prefix}tw_vfmt_videodoc_${index}_${dateNow}`, text: '📄 Video Document' },
@@ -119,7 +119,7 @@ function getVideoFormatButtons(index, dateNow) {
  * ID: <prefix>tw_ifmt_<format>_<index>_<dateNow>
  */
 function getImageFormatButtons(index, dateNow) {
-    const prefix = config.prefix || '.';
+    const prefix = database.getBotSetting('prefix') || '.';
     return [
         { id: `${prefix}tw_ifmt_image_${index}_${dateNow}`,    text: '🖼️ Image' },
         { id: `${prefix}tw_ifmt_imagedoc_${index}_${dateNow}`, text: '📄 Image Document' },
@@ -162,7 +162,7 @@ module.exports = {
         }
 
         const from           = extra.from;
-        const prefix         = config.prefix || '.';
+        const prefix         = database.getBotSetting('prefix') || '.';
         const originalSender = msg.key.participant || msg.key.remoteJid;
 
         await sock.sendMessage(from, { react: { text: '🔍', key: msg.key } });
@@ -192,7 +192,7 @@ module.exports = {
                     `⿻ *Tweet:* ${title.substring(0, 200)}\n\n` +
                     `⿻ *Type:* ${isVideo ? '🎬 Video' : '🖼️ Image'}\n\n` +
                     `*Select how to receive:*`,
-                footer:  `Made by ${config.botName}`,
+                footer:  `Made by ${database.getBotSetting('botName')}`,
                 buttons: isVideo
                     ? getVideoFormatButtons(0, fmtDateNow)
                     : getImageFormatButtons(0, fmtDateNow),
@@ -247,7 +247,7 @@ module.exports = {
                 `⿻ *Tweet:* ${title.substring(0, 200)}\n\n` +
                 `${itemList}\n\n` +
                 `*Select media to download:*`,
-            footer:  `Made by ${config.botName}`,
+            footer:  `Made by ${database.getBotSetting('botName')}`,
             buttons: getItemButtons(results, dateNow),
         }, { quoted: msg });
 
@@ -283,7 +283,7 @@ module.exports = {
                     `⿻ *Type:*  ${isVideo ? '🎬 Video' : '🖼️ Image'}\n` +
                     `⿻ *Item:*  #${item.id}\n\n` +
                     `*Select how to receive:*`,
-                footer:  `Made by ${config.botName}`,
+                footer:  `Made by ${database.getBotSetting('botName')}`,
                 buttons: isVideo
                     ? getVideoFormatButtons(itemIndex, fmtDateNow)
                     : getImageFormatButtons(itemIndex, fmtDateNow),
@@ -385,7 +385,7 @@ async function downloadAndSend({ sock, from, msg, item, title, fmtId, prefix, da
         await sock.sendMessage(from, {
             video:    { url: filePath },
             mimetype: 'video/mp4',
-            caption:  `🐦 ${title.substring(0, 200)}\n> ${config.botName}`,
+            caption:  `🐦 ${title.substring(0, 200)}\n> ${database.getBotSetting('botName')}`,
         }, { quoted: msg });
 
     } else if (formatType === 'videodoc') {
@@ -393,13 +393,13 @@ async function downloadAndSend({ sock, from, msg, item, title, fmtId, prefix, da
             document: { url: filePath },
             mimetype: 'video/mp4',
             fileName: `${cleanTitle}.mp4`,
-            caption:  `🐦 ${title.substring(0, 200)}\n> ${config.botName}`,
+            caption:  `🐦 ${title.substring(0, 200)}\n> ${database.getBotSetting('botName')}`,
         }, { quoted: msg });
 
     } else if (formatType === 'image') {
         await sock.sendMessage(from, {
             image:   { url: filePath },
-            caption: `🐦 ${title.substring(0, 200)}\n> ${config.botName}`,
+            caption: `🐦 ${title.substring(0, 200)}\n> ${database.getBotSetting('botName')}`,
         }, { quoted: msg });
 
     } else if (formatType === 'imagedoc') {
@@ -407,7 +407,7 @@ async function downloadAndSend({ sock, from, msg, item, title, fmtId, prefix, da
             document: { url: filePath },
             mimetype: 'image/jpeg',
             fileName: `${cleanTitle}.jpg`,
-            caption:  `🐦 ${title.substring(0, 200)}\n> ${config.botName}`,
+            caption:  `🐦 ${title.substring(0, 200)}\n> ${database.getBotSetting('botName')}`,
         }, { quoted: msg });
     }
 

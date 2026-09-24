@@ -7,6 +7,7 @@ const fs = require("fs");
 const path = require("path");
 const os = require("os");
 const { exec } = require("child_process");
+const ffmpegPath = require('../../utils/ffmpegPath');
 const { promisify } = require("util");
 const yts = require("yt-search");
 
@@ -25,7 +26,7 @@ async function extractAudioClip(buffer, durationSec = 15) {
 
     try {
         await execAsync(
-            `ffmpeg -v quiet -nostats -i "${inputPath}" -t ${durationSec} -ar 44100 -ac 1 -b:a 128k -y "${outputPath}"`,
+            `"${ffmpegPath()}" -v quiet -nostats -i "${inputPath}" -t ${durationSec} -ar 44100 -ac 1 -b:a 128k -y "${outputPath}"`,
             { timeout: 30000 },
         );
         const result = fs.readFileSync(outputPath);

@@ -1,5 +1,5 @@
-const config = require('../../config');
 const { generateEphoto, downloadMedia, sendGeneratedMedia } = require('./ephotoVideo');
+const database = require('../../database');
 
 const EFFECT_URLS = [
   'https://en.ephoto360.com/create-sweet-love-video-cards-online-734.html',
@@ -13,11 +13,11 @@ module.exports = {
   aliases: ['lovecard', 'sweetlove', 'loveanimation', 'lovegreeting', 'romanticvideo'],
   category: 'aivideo',
   description: 'Create a sweet love video card with your text',
-  usage: `${config.prefix || '.'}lovevideo <text>`,
+  usage: `${database.getBotSetting('prefix') || '.'}lovevideo <text>`,
 
   async execute(sock, msg, args, extra = {}) {
     const jid = msg.key.remoteJid;
-    const prefix = extra.prefix || config.prefix || '.';
+    const prefix = extra.prefix || database.getBotSetting('prefix') || '.';
     await sock.sendMessage(jid, { react: { text: '⏳', key: msg.key } });
 
     try {
@@ -26,7 +26,7 @@ module.exports = {
         return sock.sendMessage(
           jid,
           {
-            text: `💖 Love video card\n\nUsage: ${prefix}lovevideo <text>\nMaximum: 50 characters\nExample: ${prefix}lovevideo I love ${config.botName || 'you'}`,
+            text: `💖 Love video card\n\nUsage: ${prefix}lovevideo <text>\nMaximum: 50 characters\nExample: ${prefix}lovevideo I love ${database.getBotSetting('botName') || 'you'}`,
           },
           { quoted: msg },
         );

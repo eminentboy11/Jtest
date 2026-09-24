@@ -1,5 +1,5 @@
 const axios = require('axios');
-const config = require('../../config');
+const database = require('../../database');
 
 const USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0 Safari/537.36';
 
@@ -86,11 +86,11 @@ module.exports = {
   aliases: ['snap'],
   category: 'media',
   description: 'Download Snapchat Spotlight videos',
-  usage: `${config.prefix || '.'}snapchat <Spotlight URL>`,
+  usage: `${database.getBotSetting('prefix') || '.'}snapchat <Spotlight URL>`,
 
   async execute(sock, msg, args, extra = {}) {
     const jid = msg.key.remoteJid;
-    const prefix = extra.prefix || config.prefix || '.';
+    const prefix = extra.prefix || database.getBotSetting('prefix') || '.';
     const url = args[0]?.trim();
 
     if (!url) {
@@ -110,7 +110,7 @@ module.exports = {
         jid,
         {
           video,
-          caption: `Snapchat Spotlight\n${config.botName || 'JuneX-Ultra'}`,
+          caption: `Snapchat Spotlight\n${database.getBotSetting('botName') || 'JuneX-Ultra'}`,
           mimetype: 'video/mp4',
         },
         { quoted: msg },

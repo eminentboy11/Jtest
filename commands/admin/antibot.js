@@ -16,7 +16,6 @@
  */
 
 const database = require(require('path').join(global.__CORE__, 'database'));
-const config   = require(require('path').join(global.__ROOT__, 'config'));
 
 // ── Name-pattern detection (fallback for regular JIDs) ───────────────────────
 const BOT_PATTERNS = [
@@ -193,7 +192,7 @@ module.exports = {
 
             // Exempt owner
             const senderNum = sender.split('@')[0].split(':')[0];
-            if (config.ownerNumber?.some(o => o.replace(/\D/g, '') === senderNum)) return;
+            if (database.getOwners()?.some(o => o.replace(/\D/g, '') === senderNum)) return;
 
             // Exempt admins (LID-aware check)
             const participants = groupMetadata?.participants || [];

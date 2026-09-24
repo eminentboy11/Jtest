@@ -1,8 +1,8 @@
 const { createCanvas } = require('@napi-rs/canvas');
-const config = require('../../config');
+const database = require('../../database');
 
 function getBotName() {
-  return config.botName || 'JuneX-Ultra';
+  return database.getBotSetting('botName') || 'JuneX-Ultra';
 }
 
 function getFooter() {
@@ -36,7 +36,7 @@ module.exports = {
     try {
       if (args.length === 0) {
         await sock.sendMessage(jid, { 
-          text: `💰 *GOLD LOGO*\n\n*goldlogo*\n${config.prefix}goldlogo <text>\n\n*Example:*\n${config.prefix}goldlogo WOLF\n${config.prefix}goldlogo ROYAL\n${config.prefix}goldlogo LUXURY\n\n${getFooter(m.key.participant || m.key.remoteJid)}` 
+          text: `💰 *GOLD LOGO*\n\n*goldlogo*\n${database.getBotSetting('prefix')}goldlogo <text>\n\n*Example:*\n${database.getBotSetting('prefix')}goldlogo WOLF\n${database.getBotSetting('prefix')}goldlogo ROYAL\n${database.getBotSetting('prefix')}goldlogo LUXURY\n\n${getFooter(m.key.participant || m.key.remoteJid)}` 
         }, { quoted: m });
         return;
       }

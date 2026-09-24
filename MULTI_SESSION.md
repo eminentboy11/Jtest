@@ -14,13 +14,13 @@ single-session mode; multiple entries boot independently.
 
 ```env
 # single session
-JUNE_SESSIONS=[{"sessionId":"JUNE-MD:~...","phone":"2348154853640"}]
+JUNE_SESSIONS=[{"sessionId":"JUNE-X~ab12cd","phone":"2348154853640"}]
 
 # pairing-only
 JUNE_SESSIONS=[{"sessionId":"","phone":"2348154853640"}]
 
 # multiple sessions
-JUNE_SESSIONS=[{"sessionId":"JUNE-MD:~...","phone":"2348154853640"},{"sessionId":"","phone":"2348165321909"}]
+JUNE_SESSIONS=[{"sessionId":"JUNE-X~ab12cd","phone":"2348154853640"},{"sessionId":"","phone":"2348165321909"}]
 ```
 
 Rules:
@@ -42,7 +42,7 @@ Session entry fields:
 
 | Field       | Required  | Meaning                                                        |
 |-------------|-----------|----------------------------------------------------------------|
-| `sessionId` | no        | One of `JUNE-MD:~…`, `Ultra-X:~…`, `June-Ultra:~…`, `June::~…` (auto-login) |
+| `sessionId` | no        | `JUNE-X~xxxx` (4-20 alphanum, minted at /pair) — auto-login, recovery backup |
 | `phone`     | expected  | Digits with country code — pairing-code login + the self-healing fallback; the bot's identity key |
 | `id`        | **auto**  | Derived from the phone; duplicate numbers get `-2`, `-3` suffixes automatically (two sessions may share one number). Optional explicit override for a stable id |
 | `name`      | **auto**  | Derived as `June X <last3>` (e.g. `June X 640`) for dashboard/logs. An explicit name also changes that bot's `botName` |
@@ -62,7 +62,7 @@ works unchanged — `id`/`name` are simply treated as overrides.
 A session may carry **both** fields:
 
 ```json
-{ "sessionId": "JUNE-MD:~...", "phone": "2348154853640" }
+{ "sessionId": "JUNE-X~ab12cd", "phone": "2348154853640" }
 ```
 
 The bot always tries the `sessionId` first (legacy bootstrap flow). If that
