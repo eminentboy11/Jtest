@@ -21,7 +21,16 @@ const registry = require('./platform/registry');
 const sessionService = require('./platform/sessionService');
 const slots = require('./platform/slots');
 
-const PORT = Number(process.env.PORT || 3000);
+// Pterodactyl / Courtney auto-detect: SERVER_PORT is primary allocation, fallback to PORT, then 3000
+const RAW_PORT = process.env.SERVER_PORT || process.env.PTERODACTYL_PORT || process.env.PORT || '3000';
+const PORT = Number(RAW_PORT) || 3000;
+const DETECTED_ENV = {
+    SERVER_PORT: process.env.SERVER_PORT || null,
+    PTERODACTYL_PORT: process.env.PTERODACTYL_PORT || null,
+    PORT: process.env.PORT || null,
+    RAW: RAW_PORT,
+    FINAL: PORT,
+};
 const MAX_BOTS = Math.max(1, Math.floor(Number(process.env.PLATFORM_MAX_BOTS || 100)));
 const DATA_DIR = path.join(process.cwd(), 'data');
 const AUTH_ROOT = path.join(process.cwd(), 'auth');
@@ -331,9 +340,20 @@ attachPlatform(app, server).then(async () => {
     }
 
     server.listen(PORT, '0.0.0.0', () => {
-        console.log(`\n[ WEB LITE ] ✅ Running at http://0.0.0.0:${PORT}/`);
-        console.log(`[ WEB LITE ] Bots: ${bots.size}/${MAX_BOTS} | Mode: fully web-based, no env sessions, no dev dashboard`);
-        console.log(`[ WEB LITE ] RAM per bot ~15-25MB (file auth, no message store) → 100 bots ≈ 1.5-2.5GB`);
+        console.log('\n' + '='.repeat(60));
+        console.log('[ WEB LITE ] ✅ Server started — Pterodactyl/Courtney compatible');
+        console.log('='.repeat(60));
+        console.log(`[ ENV ] SERVER_PORT=${DETECTED_ENV.SERVER_PORT} | PTERODACTYL_PORT=${DETECTED_ENV.PTERODACTYL_PORT} | PORT=${DETECTED_ENV.PORT} | RAW=${DETECTED_ENV.RAW} → FINAL=${DETECTED_ENV.FINAL}`);
+        console.log(`[ LISTEN ] http://0.0.0.0:${PORT}/  (bound to 0.0.0.0)`);
+        console.log(`[ GATEWAY ] Pairing UI → http://0.0.0.0:${PORT}/`);
+        console.log(`[ HEALTH ] Health check → http://0.0.0.0:${PORT}/health`);
+        console.log(`[ HEALTH ] Details → http://0.0.0.0:${PORT}/health/details`);
+        console.log(`[ STATUS ] Simple status → http://0.0.0.0:${PORT}/status`);
+        console.log(`[ COURTNEY ] If on Pterodactyl (apps.courtneytech.xyz), open Network tab allocation IP:PORT`);
+        console.log(`[ COURTNEY ] Example: if allocation is 135.148.x.x:${PORT}, open http://135.148.x.x:${PORT}/`);
+        console.log(`[ BOTS ] ${bots.size}/${MAX_BOTS} active | Mode: fully web-based, no env sessions, no dev dashboard`);
+        console.log(`[ RAM ] ~15-25MB per bot (file auth, no store) → 100 bots ≈ 1.5-2.5GB`);
+        console.log('='.repeat(60) + '\n');
     });
 }).catch(err => {
     console.error('[ BOOT ] Platform attach failed:', err);
