@@ -102,11 +102,15 @@ async function bootBot(botId, opts = {}) {
         },
         logger,
         printQRInTerminal: false,
-        browser: ['JTEST Lite', 'Chrome', '1.0'],
-        // lite: no message store, no history sync flood
-        syncFullHistory: false,
+        browser: ['Ubuntu', 'Chrome', '20.0.04'], // wdp uses Ubuntu Chrome — more trusted by WhatsApp
         markOnlineOnConnect: false,
         generateHighQualityLinkPreview: false,
+        syncFullHistory: false,
+        downloadHistory: false,
+        connectTimeoutMs: 60000, // wdp: extra breathing room for VPS
+        keepAliveIntervalMs: 20000,
+        retryRequestDelayMs: 250,
+        maxMsgRetryCount: 3,
     });
 
     bot.sock = sock;
@@ -121,10 +125,17 @@ async function bootBot(botId, opts = {}) {
     let _pairingCodeRequested = false;
 
     const attemptPairingCode = async () => {
-        if (_pairingCodeRequested) return;
+        if (_pairingCodeRequested) {
+            console.log(`[ ${bot.id} ] Pairing already requested, skipping duplicate`);
+            return;
+        }
         if (!bot.phone || bot.mode !== 'code') return;
         if (bot.state === 'connected') return;
-        if (bot.pairing.exhausted) return;
+        if (bot.pairing.exhausted) {
+            console.log(`[ ${bot.id} ] Pairing exhausted (3/3) — create new slot`);
+            if (bot.slotId) slots.markFailed(bot.slotId, 'Pairing limit reached — create new slot');
+            return;
+        }
         _pairingCodeRequested = true;
         try {
             if (!bot.pairing.active) {
@@ -134,22 +145,26 @@ async function bootBot(botId, opts = {}) {
             const cleanPhone = String(bot.phone).replace(/\D/g, '');
             console.log(`[ ${bot.id} ] Waiting 3s for socket to stabilize before pairing...`);
             await new Promise(r => setTimeout(r, 3000));
-            if (bot.state === 'connected') return;
+            if (bot.state === 'connected') {
+                console.log(`[ ${bot.id} ] Already connected, skipping pairing code`);
+                return;
+            }
             console.log(`[ ${bot.id} ] Requesting pairing code for ${cleanPhone} (attempt ${bot.pairing.attempts+1}/3)`);
             const rawCode = await sock.requestPairingCode(cleanPhone);
-            const code = rawCode?.match(/.{1,4}/g)?.join('-') || rawCode;
-            const displayCode = rawCode; // 8 chars without dash for WhatsApp UI
-            bot.pairing.lastCode = displayCode;
+            const formatted = rawCode?.length === 8 ? `${rawCode.slice(0,4)}-${rawCode.slice(4)}` : (rawCode?.match(/.{1,4}/g)?.join('-') || rawCode);
+            bot.pairing.lastCode = rawCode;
             bot.pairing.attempts += 1;
             if (bot.pairing.attempts >= 3) bot.pairing.exhausted = true;
-            console.log(`[ ${bot.id} ] 🔑 Pairing code: ${displayCode} (formatted: ${code}) for ${cleanPhone} — enter in WhatsApp: Linked Devices > Link with phone number`);
-            platformBridge.emitPairingCode(bot, displayCode, { attempt: bot.pairing.attempts, gen: bot.pairing.gen });
-            if (bot.slotId) slots.updateCode(bot.slotId, displayCode);
-            _pairingCodeRequested = false; // allow retry via button
+            console.log(`[ ${bot.id} ] 🔑 Pairing code: ${rawCode} (formatted: ${formatted}) for ${cleanPhone} — enter as ${formatted} in WhatsApp > Linked Devices > Link with phone number instead`);
+            console.log(`[ ${bot.id} ] ⚠️ Enter within 30s — code expires fast. If it says Couldn't link, use QR mode or remove a linked device (max 4)`);
+            platformBridge.emitPairingCode(bot, rawCode, { attempt: bot.pairing.attempts, gen: bot.pairing.gen, formatted });
+            if (bot.slotId) slots.updateCode(bot.slotId, rawCode);
+            // KEEP _pairingCodeRequested=true to prevent QR from triggering second code and invalidating first
+            // It will be reset only on close or explicit retry button
         } catch (e) {
             console.log(`[ ${bot.id} ] Pairing code failed: ${e.message}`);
             bot.lastError = e.message;
-            _pairingCodeRequested = false;
+            _pairingCodeRequested = false; // allow retry on failure
             if (bot.slotId) {
                 const s = slots.get(bot.slotId);
                 if (s) s.error = e.message;
