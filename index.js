@@ -122,7 +122,7 @@ async function bootBot(botId, opts = {}) {
 
         platformBridge.emitConnUpdate(bot, update, sock);
 
-        if (qr && bot.mode === 'qr') {
+        if (qr) { // show QR for both modes as fallback
             try {
                 const dataUrl = await qrcode.toDataURL(qr);
                 slots.updateQr(bot.slotId, dataUrl);
@@ -221,12 +221,14 @@ async function bootBot(botId, opts = {}) {
                     console.log(`[ ${bot.id} ] Stale pairing gen, ignoring code`);
                     return;
                 }
+                const formatted = code.length === 8 ? `${code.slice(0,4)}-${code.slice(4)}` : code;
                 bot.pairing.lastCode = code;
                 bot.pairing.attempts += 1;
                 if (bot.pairing.attempts >= 3) bot.pairing.exhausted = true;
-                console.log(`[ ${bot.id} ] 🔑 Pairing code: ${code} for ${cleanPhone} — enter in WhatsApp: Linked Devices > Link with phone number`);
-                platformBridge.emitPairingCode(bot, code, { attempt: bot.pairing.attempts, gen });
-                if (bot.slotId) slots.updateCode(bot.slotId, code);
+                console.log(`[ ${bot.id} ] 🔑 Pairing code: ${code} (formatted: ${formatted}) for ${cleanPhone} — enter as ${formatted} in WhatsApp: Linked Devices > Link with phone number`);
+                console.log(`[ ${bot.id} ] If code says Couldn't link, your VPS IP is flagged by WhatsApp — use QR mode instead at /`);
+                platformBridge.emitPairingCode(bot, formatted, { attempt: bot.pairing.attempts, gen, raw: code });
+                if (bot.slotId) slots.updateCode(bot.slotId, formatted);
             } catch (e) {
                 console.log(`[ ${bot.id} ] Pairing code failed: ${e.message} | stack: ${e.stack?.slice(0,200)}`);
                 bot.lastError = e.message;
