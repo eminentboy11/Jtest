@@ -128,6 +128,7 @@ async function bootBot(botId, opts = {}) {
         if (qr) {
             try {
                 const dataUrl = await qrcode.toDataURL(qr);
+                bot._lastQrDataUrl = dataUrl;
                 slots.setQR(bot.id, dataUrl);
             } catch (_) {}
         }
