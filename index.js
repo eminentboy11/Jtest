@@ -150,6 +150,7 @@ async function bootBot(botId, opts = {}) {
     };
 
     sock.ev.on('connection.update', async (update) => {
+        try {
         const { connection, lastDisconnect, qr } = update;
         const statusCode = lastDisconnect?.error?.output?.statusCode;
         console.log(`[ ${bot.id} ] event: ${Object.keys(update).join(',')} conn=${connection} status=${statusCode}`);
@@ -176,6 +177,7 @@ async function bootBot(botId, opts = {}) {
             bot.pairing.active = false;
             bot.pairing.exhausted = false;
             bot.pairing._requested = false;
+            bot.reconnectCount = 0;
             console.log(`[ ${bot.id} ] ✅ Connected as ${bot.accountNumber || sock.user?.id}`);
             await registry.markPaired(bot.id, bot.accountNumber).catch(() => {});
             try { slots.setPaired(bot.id, bot.accountNumber); } catch (_) {}
@@ -195,31 +197,34 @@ async function bootBot(botId, opts = {}) {
 
         if (connection === 'close') {
             const reason = lastDisconnect?.error?.message || 'unknown';
-            const reasonLower = String(reason).toLowerCase();
-            const isConflict401 = statusCode === 401 && reasonLower.includes('conflict');
+            console.log(`[ ${bot.id} ] Close: status=${statusCode} reason=${reason} pairingDone=${bot.pairingDone} reconnectCount=${bot.reconnectCount}`);
 
-            if (bot.pairingDone || statusCode === 401 || bot.reconnectCount >= 10) {
-                if (statusCode === 401 && !bot.pairingDone) {
-                    console.log(`[ ${bot.id} ] 401 not reconnecting (will allow new code via UI)`);
-                    bot.state = 'waiting';
-                    bot.lastError = `401: ${reason} — request new code`;
-                    bot.pairing._requested = false;
-                } else if (!bot.pairingDone) {
-                    console.log(`[ ${bot.id} ] Closed (${statusCode}) ${reason} — not reconnecting (done=${bot.pairingDone})`);
-                    bot.state = 'waiting';
-                    bot.lastError = `${reason} — create new slot`;
-                    try { slots.setFailed(bot.id, reason); } catch (_) {}
-                    if (bot.slotId) try { slots.markFailed(bot.slotId, reason); } catch (_) {}
-                }
+            if (statusCode === 401) {
+                console.log(`[ ${bot.id} ] 401 session invalid — not reconnecting, allow new code via UI`);
+                bot.state = 'waiting';
+                bot.lastError = `401: ${reason} — request new code`;
+                bot.pairing._requested = false;
+                bot.pairingDone = false;
+                bot.reconnectCount = 0;
+                return;
+            }
+
+            if (bot.reconnectCount >= 10) {
+                console.log(`[ ${bot.id} ] Max reconnects 10 reached — stopping`);
+                bot.state = 'waiting';
+                bot.lastError = `${reason} — max reconnects`;
+                try { slots.setFailed(bot.id, reason); } catch (_) {}
+                if (bot.slotId) try { slots.markFailed(bot.slotId, reason); } catch (_) {}
                 return;
             }
 
             bot.reconnectCount++;
-            console.log(`[ ${bot.id} ] Reconnect #${bot.reconnectCount} in 5s (status ${statusCode}) ${reason} — 515 restart expected after code entry`);
+            console.log(`[ ${bot.id} ] Reconnect #${bot.reconnectCount} in 5s (status ${statusCode}) ${reason} ${statusCode===515?'— 515 restart expected':''}`);
             bot.state = 'connecting';
             await delay(5000);
-            bootBot(bot.id, { force: true }).catch(() => {});
+            bootBot(bot.id, { force: true }).catch((e) => console.log(`[ ${bot.id} ] Reconnect failed: ${e.message}`));
         }
+        } catch (e) { console.log(`[ ${bot.id} ] conn.update error: ${e.message} ${e.stack?.slice(0,300)}`); }
     });
 
     sock.ev.on('messages.upsert', async ({ messages }) => {
@@ -291,7 +296,7 @@ sessionService.configure({
                 pairing: { active: false, attempts: 0, exhausted: false, phone: (e.phone || '').replace(/\D/g, ''), lastCode: null, gen: 0, _requested: false },
             };
             bots.set(id, bot);
-            bootBot(id).catch(() => {});
+            bootBot(id).catch(e => console.log(`[ RESTORE ] ${id} boot failed: ${e.message}`));
             restored.push(id);
         }
         return { ok: true, restored };
