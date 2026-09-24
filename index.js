@@ -117,16 +117,61 @@ async function bootBot(botId, opts = {}) {
 
     sock.ev.on('creds.update', saveCreds);
 
+    // wdp-style: track if pairing code already requested for this connection
+    let _pairingCodeRequested = false;
+
+    const attemptPairingCode = async () => {
+        if (_pairingCodeRequested) return;
+        if (!bot.phone || bot.mode !== 'code') return;
+        if (bot.state === 'connected') return;
+        if (bot.pairing.exhausted) return;
+        _pairingCodeRequested = true;
+        try {
+            if (!bot.pairing.active) {
+                bot.pairing.active = true;
+                bot.pairing.gen += 1;
+            }
+            const cleanPhone = String(bot.phone).replace(/\D/g, '');
+            console.log(`[ ${bot.id} ] Waiting 3s for socket to stabilize before pairing...`);
+            await new Promise(r => setTimeout(r, 3000));
+            if (bot.state === 'connected') return;
+            console.log(`[ ${bot.id} ] Requesting pairing code for ${cleanPhone} (attempt ${bot.pairing.attempts+1}/3)`);
+            const rawCode = await sock.requestPairingCode(cleanPhone);
+            const code = rawCode?.match(/.{1,4}/g)?.join('-') || rawCode;
+            const displayCode = rawCode; // 8 chars without dash for WhatsApp UI
+            bot.pairing.lastCode = displayCode;
+            bot.pairing.attempts += 1;
+            if (bot.pairing.attempts >= 3) bot.pairing.exhausted = true;
+            console.log(`[ ${bot.id} ] 🔑 Pairing code: ${displayCode} (formatted: ${code}) for ${cleanPhone} — enter in WhatsApp: Linked Devices > Link with phone number`);
+            platformBridge.emitPairingCode(bot, displayCode, { attempt: bot.pairing.attempts, gen: bot.pairing.gen });
+            if (bot.slotId) slots.updateCode(bot.slotId, displayCode);
+            _pairingCodeRequested = false; // allow retry via button
+        } catch (e) {
+            console.log(`[ ${bot.id} ] Pairing code failed: ${e.message}`);
+            bot.lastError = e.message;
+            _pairingCodeRequested = false;
+            if (bot.slotId) {
+                const s = slots.get(bot.slotId);
+                if (s) s.error = e.message;
+            }
+        }
+    };
+
     sock.ev.on('connection.update', async (update) => {
         const { connection, lastDisconnect, qr } = update;
 
         platformBridge.emitConnUpdate(bot, update, sock);
 
-        if (qr) { // show QR for both modes as fallback
+        // wdp-style: when QR arrives and phone is set, intercept and request pairing code
+        if (qr) {
             try {
                 const dataUrl = await qrcode.toDataURL(qr);
                 slots.updateQr(bot.slotId, dataUrl);
             } catch (_) {}
+            // If code mode, request pairing code on QR (like wdp does)
+            if (bot.mode === 'code' && bot.phone && !_pairingCodeRequested) {
+                await attemptPairingCode();
+            }
         }
 
         if (connection === 'open') {
@@ -136,9 +181,9 @@ async function bootBot(botId, opts = {}) {
             bot.lastError = null;
             bot.pairing.active = false;
             bot.pairing.exhausted = false;
+            _pairingCodeRequested = false;
             console.log(`[ ${bot.id} ] ✅ Connected as ${bot.accountNumber || sock.user?.id}`);
             await registry.markPaired(bot.id, bot.accountNumber).catch(() => {});
-            // clear slot if exists
             if (bot.slotId) {
                 const s = slots.get(bot.slotId);
                 if (s) slots.markPaired(s.slotId, bot.accountNumber);
@@ -148,35 +193,38 @@ async function bootBot(botId, opts = {}) {
         if (connection === 'close') {
             const statusCode = lastDisconnect?.error?.output?.statusCode;
             const reason = lastDisconnect?.error?.message || 'unknown';
+            const reasonLower = String(reason).toLowerCase();
             const isPairingPhase = bot.mode === 'code' && bot.state !== 'connected' && (bot.pairing?.active || !bot.connectedAt);
-            console.log(`[ ${bot.id} ] ❌ Closed (${statusCode}) ${reason} | pairingPhase=${isPairingPhase}`);
+            const isConflict401 = statusCode === 401 && reasonLower.includes('conflict');
+            console.log(`[ ${bot.id} ] ❌ Closed (${statusCode}) ${reason} | pairingPhase=${isPairingPhase} conflict=${isConflict401}`);
 
-            if (statusCode === DisconnectReason.loggedOut) {
+            if (statusCode === DisconnectReason.loggedOut && !isConflict401) {
                 bot.state = 'needs-login';
                 bot.lastError = 'Logged out — pair again via web at /';
                 if (bot.slotId) slots.markFailed(bot.slotId, 'logged-out');
+            } else if (isConflict401) {
+                // 401 conflict is recoverable, don't clear session (wdp-style)
+                console.log(`[ ${bot.id} ] ⚠️ 401 conflict — recoverable, retrying in 3s`);
+                bot.state = 'connecting';
+                setTimeout(() => bootBot(bot.id, { force: true }).catch(() => {}), 3000);
             } else if (statusCode === 401 && isPairingPhase) {
-                // 401 during pairing = code not entered / expired / rate limited — keep waiting, allow retry
                 bot.state = 'waiting';
-                bot.lastError = `Pairing 401: ${reason} — request new code at /`;
-                console.log(`[ ${bot.id} ] ⚠️ 401 during pairing — keeping slot alive for retry`);
-                if (bot.slotId) {
-                    const s = slots.get(bot.slotId);
-                    if (s && s.status === 'waiting') {
-                        // don't fail slot, keep it waiting
-                    }
-                }
-                // auto retry boot after 5s to allow new code request
+                bot.lastError = `Pairing 401: ${reason} — request new code`;
+                console.log(`[ ${bot.id} ] ⚠️ 401 during pairing — keeping slot alive, request new code via UI`);
+                _pairingCodeRequested = false;
                 setTimeout(() => bootBot(bot.id, { force: true }).catch(() => {}), 5000);
             } else if (statusCode === 503 && isPairingPhase) {
-                // 503 Stream Errored — Baileys version or network hiccup, retry quickly
                 bot.state = 'connecting';
                 bot.lastError = `Stream 503: ${reason} — retrying...`;
                 console.log(`[ ${bot.id} ] ⚠️ 503 during pairing — retrying in 3s`);
+                _pairingCodeRequested = false;
                 setTimeout(() => bootBot(bot.id, { force: true }).catch(() => {}), 3000);
             } else if (statusCode === 408) {
+                // QR refs attempts ended — wdp-style, this happens when QR expires without pairing
+                console.log(`[ ${bot.id} ] ⚠️ 408 QR refs ended — will re-request pairing on next QR`);
                 bot.state = 'connecting';
-                setTimeout(() => bootBot(bot.id, { force: true }).catch(() => {}), 3000);
+                _pairingCodeRequested = false;
+                setTimeout(() => bootBot(bot.id, { force: true }).catch(() => {}), 2000);
             } else {
                 bot.state = 'connecting';
                 setTimeout(() => bootBot(bot.id, { force: true }).catch(() => {}), 4000);
