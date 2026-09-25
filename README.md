@@ -7,27 +7,30 @@
 Previous edition was **9MB + 700 deps (48 packages, ffmpeg, sharp, jimp, ytdl, scrapers, pdfkit, etc)** + 309 commands loaded in memory + SQLite per bot + message store + group caches = **80-150MB RAM per bot** → 30 bots = 4.5GB.
 
 **Lite is:**
-- **16 declared deps**, of which 7 are load-bearing for the gateway: `baileys, express, qrcode, dotenv, pino, ws, awesome-phonenumber`
+- **12 declared deps**, of which 7 are load-bearing for the gateway: `baileys, express, qrcode, dotenv, pino, ws, awesome-phonenumber`
 - **No database engine at all** — no `better-sqlite3`, no `sql.js`, no `mongodb`, no `pg`. Storage is one plain JSON file per bot (see [Data Storage](#data-storage))
-- **No `sharp`, no scrapers, no `moment`** — media/scraper commands were removed with the command purge
+- **No `sharp`, no scrapers, no `moment`, no ffmpeg, no webp tooling** — media/scraper commands were removed with the command purge
 - **File auth** `auth/<botId>/creds.json`
 - **No message store**, no group metadata cache, no anti-delete queues
 - **No dev dashboard** (`/dev` removed), no `logStore`, no MongoDB registry
 - **No JUNE_SESSIONS env** — sessions only via web UI at `/`, persisted in `data/platform-registry.json`
 - **No JUNE_PLATFORM toggle** — always web
 - **2 commands shipped** (`.ping`, `.uptime`) behind a real hot-reloading loader — drop a file in `commands/` and it registers without a restart
+- **Zero unreachable code** — every one of the 27 remaining `.js` files is reachable from `index.js` or `commands/`
 
-**Measured** (Node 20, `--expose-gc`, 0 bots paired):
+**Measured** (Node 20, `--expose-gc`). The database columns compare against a worktree of the previous commit, same script, same session:
 
 | | before | after |
 |---|---|---|
-| Idle RSS, whole app | 99.6 MB | **87.9 MB** |
-| Cold boot to "Server started" | 437 ms | **321 ms** |
-| `database.js` alone — boot | 119 ms | **15 ms** |
-| `database.js` alone — RSS | 57.4 MB | **39.5 MB** |
+| `database.js` boot | 119 ms | **15 ms** |
+| `database.js` RSS | 57.4 MB | **39.5 MB** |
 | Resident modules for the DB layer | 54 | **4** |
-| Repo JS | 14,773 lines | **8,956 lines** |
-| `node_modules` | 276 MB / 282 pkgs | **230 MB / 240 pkgs** |
+| Whole-app cold boot | 437 ms | **~350 ms** |
+| Whole-app idle RSS, settled, 0 bots | 99.6 MB | **87–92 MB** |
+| Repo JS | 67,320 → 14,773 lines | **5,516 lines** |
+| Repo JS files | — | **27** |
+| Declared deps | 36 → 20 | **12** |
+| `node_modules` | 471 MB → 276 MB | **106 MB / 211 pkgs** |
 
 **Per bot, once populated** (8 groups × 40 members × 7 days of activity): **+0.41 MB RSS**, **44 KB on disk**. 25 such bots add 10.3 MB total — the database is no longer a scaling factor. Remaining per-bot cost is the Baileys socket itself (~15–25 MB), so a 500 MB VPS realistically carries **~20 bots**, and a 4 GB box ~120–150.
 
@@ -149,17 +152,20 @@ No `/dev/*` — dev dashboard removed completely.
 9. Anti-delete + group stats + auto-react caches per bot
 10. `.env` watcher + hot-reload + `JUNE_SESSIONS` JSON parsing every 15s
 
-Items **2 and 6 are now gone** — no database engine is installed at all, and the DB layer's module count dropped from 54 to 4. Items 3, 4, 7, 8, 9 and 10 went with the command purge.
+Items **2 and 6 are now gone** — no database engine is installed at all, and the DB layer's module count dropped from 54 to 4. Items 3, 4, 7, 8, 9 and 10 went with the command purge. Item 1's ffmpeg/webp half is gone too: `ffmpeg-static` (77 MB), `webp-converter` (33 MB), `fluent-ffmpeg` (13 MB) and `file-type` were dropped along with the 21 unreachable `utils/` files that were their only consumers — **124 MB of `node_modules`**.
 
-**Still riding along**, each pulled in by exactly one `utils/` file that nothing currently requires — the largest remaining win, worth ~123 MB of `node_modules`:
+**Four deps are declared but not currently required by any live file.** They are kept on purpose, because restoring commands from git history needs them and each is cheap:
 
-| package | size | only required by |
+| package | size | removed commands that require it |
 |---|---|---|
-| `ffmpeg-static` | 77 MB | `utils/ffmpegPath.js` |
-| `webp-converter` | 33 MB | `utils/sticker.js` |
-| `fluent-ffmpeg` | 13 MB | `utils/sticker.js` |
+| `axios` | 2.2 MB | **69** of 312 |
+| `jimp` | 3.3 MB | 2 — also an optional Baileys peer dep for image handling |
+| `node-webpmux` | 552 KB | 9 |
+| `form-data` | 345 KB | 6 |
 
-They are left declared so that restoring a sticker/video command from git history (`git checkout 16d1f45 -- commands/<path>`) keeps working. Delete them only if you are sure those commands are not coming back.
+~3.4 MB total to keep 87 command restores working. Drop them only if you are certain those commands are not coming back; re-add the media tooling with `npm i ffmpeg-static fluent-ffmpeg webp-converter` if you restore a sticker or video command.
+
+`utils/bot_image.jpg` and `utils/menu*.jpg` (280 KB) are likewise unused now but were the menu command's assets — kept for the same reason.
 
 ## Scaling
 
