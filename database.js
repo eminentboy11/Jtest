@@ -709,6 +709,19 @@ const saveAntideleteMessage = (chatId, messageId, payload, storedAt) => {
   return true;
 };
 const getAntideleteMessage = (chatId, messageId) => getKV('antidelete', adKey(chatId, messageId));
+
+// antiedit was removed as a product decision; .antiall still reports a mode
+// for it, so the honest answer is a constant 'off' rather than a crash.
+const getAntieditMode = () => 'off';
+const isAntideleteStatusEnabled = () => getKV('antidelete', 'status') === true;
+const setAntideleteStatusEnabled = (on) => setKV('antidelete', 'status', on === true);
+
+// menu display toggles (showUptime / showMemory / showProgressBar / ...)
+const getMenuSettings = () => clone(getBotSetting('menuSettings') || {});
+const setMenuSettings = (patch) => {
+  setBotSetting('menuSettings', { ...(getBotSetting('menuSettings') || {}), ...(patch || {}) });
+  return getMenuSettings();
+};
 const deleteAntideleteMessage = (chatId, messageId) => delKV('antidelete', adKey(chatId, messageId));
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────
@@ -807,6 +820,8 @@ module.exports = {
   // antidelete
   getAntideleteMode, setAntideleteMode, ANTIDELETE_MODES,
   saveAntideleteMessage, getAntideleteMessage, deleteAntideleteMessage,
+  getAntieditMode, isAntideleteStatusEnabled, setAntideleteStatusEnabled,
+  getMenuSettings, setMenuSettings,
 
   // constants
   MESSAGES, SOCIAL, API_KEYS, ANTICALL_PRESETS, VERSION, SESSION_NAME,

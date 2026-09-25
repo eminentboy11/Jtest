@@ -15,10 +15,11 @@ Previous edition was **9MB + 700 deps (48 packages, ffmpeg, sharp, jimp, ytdl, s
 - **No dev dashboard** (`/dev` removed), no `logStore`, no MongoDB registry
 - **No JUNE_SESSIONS env** — sessions only via web UI at `/`, persisted in `data/platform-registry.json`
 - **No JUNE_PLATFORM toggle** — always web
-- **18 commands shipped** behind a real hot-reloading loader — drop a file in `commands/` and it registers without a restart:
+- **30 commands shipped** behind a real hot-reloading loader — drop a file in `commands/` and it registers without a restart:
   - health: `.ping`, `.uptime`
-  - moderation: `.antispam`, `.antiviewonce`, `.antibot`, `.antiforward`, `.antitagadmins`, `.antidelete`
-  - utility: `.menu`, `.help`, `.sticker`, `.vv`, `.save`, `.mygroups`, `.chatbot`
+  - moderation: `.antispam`, `.antiviewonce`, `.antibot`, `.antiforward`, `.antitagadmins`, `.antidelete`, `.antiall`
+  - utility: `.menu`, `.help`, `.sticker`, `.vv`/`.vv2`, `.save`, `.mygroups`, `.chatbot`
+  - owner tools: `.mode`, `.setprefix`, `.setfont`, `.setbotpp`, `.autoreact`, `.autotyping`, `.autorecording`, `.autorecordtype`, `.add`, `.all`, `.tagall`
   - rich-app games: `.ttt2`, `.tod`, `.snake`
 
   This edition is deliberately a light gateway plus a core command set. The full
@@ -214,7 +215,7 @@ Fully web-based edition — nothing like switching mode through env.
 npm test
 ```
 
-132 assertions across six suites, using Node's built-in runner — no test framework dependency. Runs serially (`--test-concurrency=1`) because the loader suite writes real temporary files into `commands/`.
+138 assertions across seven suites, using Node's built-in runner — no test framework dependency. Runs serially (`--test-concurrency=1`) because the loader suite writes real temporary files into `commands/`.
 
 | suite | covers |
 |---|---|
@@ -224,6 +225,7 @@ npm test
 | `test/loader.test.js` | command discovery, alias shadowing, fault tolerance, hot reload through the live dispatch table |
 | `test/structure.test.js` | whole-repo invariants: syntax, module graph, dependency hygiene, no committed secrets |
 | `test/logging.test.js` | libsignal's session churn staying silenced while decrypt failures still print — driven against the real libsignal `SessionRecord` |
+| `test/startup.test.js` | the paired-bot startup card (prefix, owner, platform, counts) and the single-source platform detection behind `global.platform` |
 
 `test/structure.test.js` is the one worth reading if you change the build. It exists because two npm scripts pointed at files that were not in the repo, and nothing caught it:
 
