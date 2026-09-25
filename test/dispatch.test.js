@@ -238,6 +238,30 @@ describe('the restored commands respond', () => {
     assert.ok(/status/.test(s._rec.texts[0]), s._rec.texts[0]);
   });
 
+  test('.deploy refuses non-owners without provisioning anything', async () => {
+    const s = H.makeSock();
+    await run(s, H.textMsg('.deploy 2348012345678', { sender: H.MEMBER }));
+    await H.sleep(200);
+    assert.equal(s._rec.texts.length, 1, JSON.stringify(s._rec.texts));
+    assert.ok(/Owner only/.test(s._rec.texts[0]), s._rec.texts[0]);
+  });
+
+  test('.deploy without a number shows usage, not an error', async () => {
+    const s = H.makeDmSock();
+    await run(s, H.textMsg('.deploy', { dm: true, remoteJid: H.OWNER }));
+    await H.sleep(200);
+    assert.equal(s._rec.texts.length, 1, JSON.stringify(s._rec.texts));
+    assert.ok(/forgot the number/.test(s._rec.texts[0]), s._rec.texts[0]);
+  });
+
+  test('.deploy rejects bad numbers before touching the platform', async () => {
+    const s = H.makeDmSock();
+    await run(s, H.textMsg('.deploy abc,123', { dm: true, remoteJid: H.OWNER }));
+    await H.sleep(200);
+    assert.equal(s._rec.texts.length, 1, JSON.stringify(s._rec.texts));
+    assert.ok(/Invalid number format/.test(s._rec.texts[0]), s._rec.texts[0]);
+  });
+
   test('.help answers with the rich card or its fallback, never a crash', async () => {
     const s = H.makeDmSock();
     await run(s, H.textMsg('.help', { dm: true }));
