@@ -204,8 +204,23 @@ async function bootBot(botId, opts = {}) {
                 // Send startup message via WDP style
                 try {
                     const selfJid = sock.user?.id ? sock.user.id.split(':')[0] + '@s.whatsapp.net' : null;
-                    if (selfJid) {
-                        await sock.sendMessage(selfJid, { text: `✅ JUNE X WEB EDITION Connected\n\n• Bot: ${bot.id}\n• Number: +${bot.accountNumber}\n• Mode: velvet-sparrow + wdp\n• Commands: ${commandCount()} (full wdp)\n• .ping → pong\n• .uptime → runtime\n\nPaired via :${PORT}/` });
+                    const welcomeText = applyFont(
+`┏━━━✧ JUNE X WEB ✧━━━━
+┃✧ Bot: ${juneDatabase.getBotSetting('botName')}
+┃✧ Prefix: [ ${prefix} ]
+┃✧ Owner: ${ownerName}
+┃✧ Platform: ${platform}
+┃✧ Status: online 
+┃✧ Time: ${new Date().toLocaleString()}
+┃✧ Commands: ${commandCount()}
+┃✧ BotId: ${bot.id}
+┃✧ Number: +${bot.accountNumber}
+┃✧ T.Group: t.me/juneOff
+┃✧ Telegram: t.me/supremlord
+┃✧ Repo: https://github.com/Vinpink2
+┗━━━━━━━━━━━━━━━` )
+    if (selfJid) {
+ await sock.sendMessage(selfJid,{ text: welcomeText });
                     }
                 } catch (e) { console.log(`[ ${bot.id} ] Startup msg failed: ${e.message}`); }
             }
