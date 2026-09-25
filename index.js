@@ -356,8 +356,10 @@ const server = http.createServer(app);
 attachPlatform(app, server).then(async () => {
     try {
         let active = [];
-        try { active = await registry.listActive(); } catch {}
-        let entries = active.map(r => ({ id: r.botId, phone: r.phone, qrLogin: r.mode === 'qr', restoreOnly: true }));
+        try { active = await registry.listActive(); } catch(e){ console.log('[ BOOT ] Registry list failed', e.message); }
+        // Pass original registry records (with webManaged) to sessionService
+        let entries = active;
+        let source = 'registry';
         if (entries.length === 0) {
             try {
                 if (fs.existsSync(AUTH_ROOT)) {
@@ -366,23 +368,25 @@ attachPlatform(app, server).then(async () => {
                     });
                     if (dirs.length) {
                         console.log(`[ BOOT ] Registry empty but found ${dirs.length} auth folder(s) — restoring from auth scan (wdp-style)`);
+                        entries = [];
                         for (const dir of dirs) {
-                            entries.push({ id: dir, phone: null, qrLogin: false, restoreOnly: true });
+                            entries.push({ botId: dir, id: dir, phone: null, mode: 'code', webManaged: true, restoreOnly: true });
                             try { await registry.trackSession(dir, { phone: null, mode: 'code' }); } catch {}
                         }
+                        source = 'auth scan';
                     }
                 }
             } catch (e) { console.log('[ BOOT ] Auth scan failed:', e.message); }
         }
         if (entries.length) {
-            console.log(`[ BOOT ] Restoring ${entries.length} persisted session(s) from ${active.length?'registry':'auth scan'}...`);
+            console.log(`[ BOOT ] Restoring ${entries.length} persisted session(s) from ${source}...`);
             const res = await sessionService.restorePersisted(entries);
             console.log(`[ BOOT ] Restore result: ${JSON.stringify(res)} — bots now ${bots.size}`);
         } else {
             console.log('[ BOOT ] No persisted sessions — waiting for web pairing at /');
         }
     } catch (e) {
-        console.log('[ BOOT ] Restore failed:', e.message);
+        console.log('[ BOOT ] Restore failed:', e.message, e.stack?.slice(0,300));
     }
     server.listen(PORT, '0.0.0.0', () => {
         console.log('\n' + '='.repeat(60));
