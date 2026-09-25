@@ -356,16 +356,51 @@ const server = http.createServer(app);
 
 attachPlatform(app, server).then(async () => {
     try {
-        const active = await registry.listActive();
-        const entries = active.map(r => ({ id: r.botId, phone: r.phone, qrLogin: r.mode === 'qr', restoreOnly: true }));
+        let active = [];
+        try { active = await registry.listActive(); } catch(e){ console.log('[ BOOT ] Registry list failed', e.message); }
+        let entries = active.map(r => ({ id: r.botId, phone: r.phone, qrLogin: r.mode === 'qr', restoreOnly: true }));
+
+        // WDP-style fallback: if registry empty, scan auth/ folder directly — registry may be lost but auth still exists
+        if (entries.length === 0) {
+            try {
+                const authRoot = path.join(process.cwd(), 'auth');
+                if (fs.existsSync(authRoot)) {
+                    const dirs = fs.readdirSync(authRoot).filter(n => {
+                        try { return fs.statSync(path.join(authRoot, n)).isDirectory(); } catch { return false; }
+                    });
+                    if (dirs.length) {
+                        console.log(`[ BOOT ] Registry empty but found ${dirs.length} auth folder(s) — restoring from auth scan (wdp-style)`);
+                        for (const dir of dirs) {
+                            // Try to read creds to get phone if possible, but use dir as id
+                            let phone = null;
+                            try {
+                                const credsPath = path.join(authRoot, dir, 'creds.json');
+                                if (fs.existsSync(credsPath)) {
+                                    const creds = JSON.parse(fs.readFileSync(credsPath, 'utf8'));
+                                    const meId = creds?.me?.id || '';
+                                    phone = meId.split(':')[0].split('@')[0] || null;
+                                }
+                            } catch {}
+                            entries.push({ id: dir, phone, qrLogin: false, restoreOnly: true });
+                            // Also ensure registry tracks it for next boot
+                            try { await registry.trackSession(dir, { phone, mode: 'code' }); } catch {}
+                        }
+                    }
+                }
+            } catch (e) {
+                console.log('[ BOOT ] Auth scan failed:', e.message);
+            }
+        }
+
         if (entries.length) {
-            console.log(`[ BOOT ] Restoring ${entries.length} persisted session(s) from registry...`);
-            await sessionService.restorePersisted(entries);
+            console.log(`[ BOOT ] Restoring ${entries.length} persisted session(s) from ${active.length?'registry':'auth scan'}...`);
+            const res = await sessionService.restorePersisted(entries);
+            console.log(`[ BOOT ] Restore result: ${JSON.stringify(res)} — bots now ${bots.size}`);
         } else {
             console.log('[ BOOT ] No persisted sessions — waiting for web pairing at /');
         }
     } catch (e) {
-        console.log('[ BOOT ] Restore failed:', e.message);
+        console.log('[ BOOT ] Restore failed:', e.message, e.stack?.slice(0,300));
     }
     server.listen(PORT, '0.0.0.0', () => {
         console.log('\n' + '='.repeat(60));
