@@ -2,6 +2,8 @@
  * Web Lite — session orchestration (provision + GC), no heavy deps.
  */
 'use strict';
+
+const DEBUG_LOG = ['true','1','yes','on'].includes(String(process.env.DEBUG || '').trim().toLowerCase());
 const qrcode = require('qrcode');
 const bridge = require('./bridge');
 const slots = require('./slots');
@@ -182,7 +184,7 @@ async function runGC(trigger = 'interval') {
 }
 
 let _gcTimer = null;
-function startGC() { if (_gcTimer) return; _gcTimer = setInterval(() => { void runGC('interval'); }, GC_INTERVAL_MS); _gcTimer.unref?.(); console.log('[ PLATFORM ] GC started (60s)'); }
+function startGC() { if (_gcTimer) return; _gcTimer = setInterval(() => { void runGC('interval'); }, GC_INTERVAL_MS); _gcTimer.unref?.(); if (DEBUG_LOG) console.log('[ PLATFORM ] GC started (60s)'); }
 function stopGC() { if (_gcTimer) clearInterval(_gcTimer); _gcTimer = null; }
 function getGcStats() { return { ...gcStats }; }
 

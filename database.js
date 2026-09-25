@@ -1,5 +1,7 @@
 'use strict';
 
+const DEBUG_LOG = ['true','1','yes','on'].includes(String(process.env.DEBUG || '').trim().toLowerCase());
+
 /**
  * Per-bot JSON data store.
  *
@@ -747,7 +749,7 @@ function initialize() {
 }
 const ready = Promise.resolve().then(() => {
   _ready = initialize();
-  console.log(`[DB] JSON store ready — ${DATA_DIR}`);
+  if (DEBUG_LOG) console.log(`[DB] JSON store ready — ${DATA_DIR}`);
   return _ready;
 }).catch((error) => {
   console.error(`[DB] Startup failed: ${error.message}`);
