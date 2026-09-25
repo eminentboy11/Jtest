@@ -19,7 +19,7 @@ const pino = require('pino');
 const database = require('./database');
 const { applyFont } = require('./utils/fontConverter')
 const detectPlatform = require('./utils/platform');
-const { buildStartupCard } = require('./utils/startupCard');
+const { buildStartupCard, resolveStartupFields } = require('./utils/startupCard');
 // Platform (from lite) — web gateway
 const platformBridge = require('./platform/bridge');
 const { attachPlatform } = require('./platform');
@@ -208,20 +208,13 @@ async function bootBot(botId, opts = {}) {
                 // Send startup message via WDP style
                 try {
                     const selfJid = sock.user?.id ? sock.user.id.split(':')[0] + '@s.whatsapp.net' : null;
-                    const prefix = database.getBotSetting('prefix') === '' ? 'none' : (database.getBotSetting('prefix') || '.');
-                    const ownerName = database.getOwnerNames()[0] || 'Bot Owner';
-                    const welcomeText = buildStartupCard({
-                      botName: database.getBotSetting('botName'),
-                      prefix,
-                      ownerName,
-                      platform: global.platform,
-                      time: new Date().toLocaleString(),
-                      commandCount: commandCount(),
-                      botId: bot.id,
-                      accountNumber: bot.accountNumber,
+                    // Resolved inside this bot's own database context, so the
+                    // prefix and owner shown are THIS bot's, not the default's.
+                    const fields = await resolveStartupFields({
+                      database, sock, bot, commandCount: commandCount(),
                     });
                     if (selfJid) {
-                      await sock.sendMessage(selfJid, { text: welcomeText });
+                      await sock.sendMessage(selfJid, { text: buildStartupCard(fields) });
                     }
                 } catch (e) { console.log(`[ ${bot.id} ] Startup msg failed: ${e.message}`); }
             }
