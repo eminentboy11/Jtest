@@ -18,6 +18,8 @@ const pino = require('pino');
 // WDP core
 const database = require('./database');
 const { applyFont } = require('./utils/fontConverter')
+const detectPlatform = require('./utils/platform');
+const { buildStartupCard } = require('./utils/startupCard');
 // Platform (from lite) — web gateway
 const platformBridge = require('./platform/bridge');
 const { attachPlatform } = require('./platform');
@@ -38,6 +40,9 @@ fs.mkdirSync(DATA_DIR, { recursive: true });
 fs.mkdirSync(AUTH_ROOT, { recursive: true });
 
 const logger = pino({ level: 'fatal' }).child({ level: 'fatal' });
+
+// One platform answer per process, shared by the startup card and the menu.
+global.platform = detectPlatform();
 
 // For web edition, we reuse lite's bot management but with wdp's full handler
 const bots = new Map();
@@ -173,22 +178,6 @@ async function bootBot(botId, opts = {}) {
             bot.pairing._requested = false;
         }
     }; 
-function detectPlatform() {
-  if (process.env.DYNO) return '☁️ Heroku';
-  if (process.env.RENDER) return '⚡ Render';
-  if (process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID) return '🚉 Railway';
-  if (process.env.REPLIT_SLUG || process.env.REPL_ID) return '🔵 Replit';
-  if (process.env.PREFIX && process.env.PREFIX.includes('termux')) return '📱 Termux';
-  if (process.env.PORTS && process.env.CYPHERX_HOST_ID) return '🌀 CypherX Platform';
-  if (process.env.P_SERVER_UUID) return '🖥️ Panel';
-  if (process.env.LXC) return '🐦‍⬛ Linux Container (LXC)';
-  switch (os.platform()) {
-    case 'win32': return '🪟 Windows';
-    case 'darwin': return '🍎 macOS';
-    case 'linux': return '🐧 Linux';
-    default: return '❓ Unknown';
-  }
-}
     sock.ev.on('connection.update', async (update) => {
         try {
             const { connection, lastDisconnect, qr } = update;
@@ -219,26 +208,20 @@ function detectPlatform() {
                 // Send startup message via WDP style
                 try {
                     const selfJid = sock.user?.id ? sock.user.id.split(':')[0] + '@s.whatsapp.net' : null;
-                    const prefix = database.getBotSetting('prefix') === '' ? 'none' : (database.getBotSetting('prefix') || '.')
-        global.platform = detectPlatform()
-        const ownerName = (Array.isArray(database.getOwnerNames()) ? database.getOwnerNames()[0] : database.getOwnerNames()) || 'Bot Owner'
-const welcomeText = applyFont(
-`┏━━━✧ JUNE X WEB ✧━━━━
-┃✧ Bot: ${database.getBotSetting('botName')}
-┃✧ Prefix: [ ${prefix} ]
-┃✧ Owner: ${ownerName}
-┃✧ Platform: ${global.platform}
-┃✧ Status: online 
-┃✧ Time: ${new Date().toLocaleString()}
-┃✧ Commands: ${commandCount()}
-┃✧ BotId: ${bot.id}
-┃✧ Number: +${bot.accountNumber}
-┃✧ T.Group: t.me/juneOff
-┃✧ Telegram: t.me/supremlord
-┃✧ Repo: https://github.com/Vinpink2
-┗━━━━━━━━━━━━━━━` )
-    if (selfJid) {
- await sock.sendMessage(selfJid,{ text: welcomeText });
+                    const prefix = database.getBotSetting('prefix') === '' ? 'none' : (database.getBotSetting('prefix') || '.');
+                    const ownerName = database.getOwnerNames()[0] || 'Bot Owner';
+                    const welcomeText = buildStartupCard({
+                      botName: database.getBotSetting('botName'),
+                      prefix,
+                      ownerName,
+                      platform: global.platform,
+                      time: new Date().toLocaleString(),
+                      commandCount: commandCount(),
+                      botId: bot.id,
+                      accountNumber: bot.accountNumber,
+                    });
+                    if (selfJid) {
+                      await sock.sendMessage(selfJid, { text: welcomeText });
                     }
                 } catch (e) { console.log(`[ ${bot.id} ] Startup msg failed: ${e.message}`); }
             }

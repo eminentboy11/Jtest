@@ -1337,6 +1337,13 @@ const handleMessage = async (sock, msg) => {
       senderIsOwner ? 'OWNER' : senderIsSudo ? 'SUDO' : 'USER'
     );
 
+    // Remember the owner's WhatsApp display name so the startup card and the
+    // menu can show a name instead of a number. Only fills an empty setting,
+    // so an explicitly stored owner name is never overwritten.
+    if (senderIsOwner && msg.pushName && !database.getBotSetting('ownerName')) {
+      try { database.setOwnerNames([msg.pushName]); } catch (_) {}
+    }
+
     const { applyFont } = require('./utils/fontConverter');
     await command.execute(sock, msg, args, {
       from,

@@ -71,9 +71,14 @@ describe('discovery', () => {
     // three rich-app games. Asserted by name so a surprise command is visible.
     const expected = [
       'ping', 'uptime',
-      'antispam', 'antiviewonce', 'antibot', 'antiforward', 'antitagadmins',
-      'menu', 'help', 'sticker', 'vv', 'save', 'chatbot', 'mygroups', 'antidelete',
+      'antispam', 'antiviewonce', 'antibot', 'antiforward', 'antitagadmins', 'antidelete',
+      'menu', 'help', 'sticker', 'save', 'chatbot', 'mygroups',
       'ttt2', 'tod', 'snake',
+      // the owner's own additions
+      'add', 'all', 'antiall', 'tagall', 'autoreact', 'autorecording',
+      'autorecordtype', 'autotyping', 'mode', 'setbotpp', 'setfont', 'setprefix',
+      // their vv.js registers under this name, with vv/vv2 as aliases
+      'viewonce',
     ].sort();
     const actual = [...new Set([...table.values()].map((c) => c.name))].sort();
     assert.deepEqual(actual, expected);

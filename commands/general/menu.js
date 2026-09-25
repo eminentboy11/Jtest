@@ -22,6 +22,7 @@ const { loadCommands } = require('../../utils/commandLoader');
 const { applyFont } = require('../../utils/fontConverter');
 const os = require('os');
 const db = require('../../database');
+const detectPlatform = require('../../utils/platform');
 
 // ─────────────────────────────────────────────────────────────
 // Create fake contact for enhanced quoted replies
@@ -53,65 +54,6 @@ function createFakeContact(msg) {
 // Detect hosting / operating platform
 // ─────────────────────────────────────────────────────────────
 
-function detectPlatform() {
-    if (
-        process.env.RAILWAY_ENVIRONMENT ||
-        process.env.RAILWAY_PROJECT_ID
-    ) {
-        return '🚉 Railway';
-    }
-
-    if (process.env.DYNO) {
-        return '☁️ Heroku';
-    }
-
-    if (process.env.RENDER) {
-        return '⚡ Render';
-    }
-
-    if (
-        process.env.REPL_ID ||
-        process.env.REPL_SLUG
-    ) {
-        return '🔵 Replit';
-    }
-
-    if (
-        process.env.PREFIX &&
-        process.env.PREFIX.includes('termux')
-    ) {
-        return '📱 Termux';
-    }
-
-    if (
-        process.env.PORTS &&
-        process.env.CYPHERX_HOST_ID
-    ) {
-        return '🌀 CypherX Platform';
-    }
-
-    if (process.env.P_SERVER_UUID) {
-        return '🖥️ Panel';
-    }
-
-    if (process.env.LXC) {
-        return '📦 Linux Container (LXC)';
-    }
-
-    switch (os.platform()) {
-        case 'win32':
-            return '🪟 Windows';
-
-        case 'darwin':
-            return '🍎 macOS';
-
-        case 'linux':
-            return '🐧 Linux';
-
-        default:
-            return '❓ Unknown';
-    }
-}
 
 // ─────────────────────────────────────────────────────────────
 // Format uptime
@@ -225,7 +167,9 @@ function buildMenuText(cats, totalCount, speed, filter = '') {
     const safeOwner =
         ownerName || 'Bot Owner';
 
-    const platform = detectPlatform();
+    // index.js computed this once at load; fall back only if a command runs
+    // in a process that never went through index.js (tests, child tools).
+    const platform = global.platform || detectPlatform();
     const uptime = formatUptime();
 
     const totalMemory = os.totalmem();
