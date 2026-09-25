@@ -66,9 +66,17 @@ describe('discovery', () => {
     const table = loader.loadCommands();
     assert.ok(table.get('ping'), 'ping must be found');
     assert.ok(table.get('uptime'), 'uptime must be found');
-    // ping, uptime and the five moderation hooks
     assert.equal(table.commandCount, BASE_COMMANDS);
-    assert.equal(BASE_COMMANDS, 7, 'ping + uptime + 5 hooks');
+    // The shipped set: health, moderation, the restored June X nine, and the
+    // three rich-app games. Asserted by name so a surprise command is visible.
+    const expected = [
+      'ping', 'uptime',
+      'antispam', 'antiviewonce', 'antibot', 'antiforward', 'antitagadmins',
+      'menu', 'help', 'sticker', 'vv', 'save', 'chatbot', 'mygroups', 'antidelete',
+      'ttt2', 'tod', 'snake',
+    ].sort();
+    const actual = [...new Set([...table.values()].map((c) => c.name))].sort();
+    assert.deepEqual(actual, expected);
   });
 
   test('commands are found recursively, not just at the top level', () => {

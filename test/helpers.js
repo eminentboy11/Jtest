@@ -90,7 +90,7 @@ async function boot(opts = {}) {
 function makeSock(over = {}) {
   const rec = {
     sent: [], deletes: [], texts: [], images: [], videos: [], audios: [],
-    kicks: [], reacts: [], presences: [],
+    kicks: [], reacts: [], presences: [], relayed: [],
   };
   const participants = over.participants || [
     { id: BOT, admin: 'superadmin' },
@@ -109,6 +109,12 @@ function makeSock(over = {}) {
       if (content?.video) rec.videos.push(content);
       if (content?.audio) rec.audios.push(content);
       return { key: { remoteJid: jid, fromMe: true, id: 'S' + rec.sent.length } };
+    },
+    // The rich-app channel (help, ttt2, tod, snake) sends through
+    // relayMessage, not sendMessage, so it needs its own recorder.
+    relayMessage: async (jid, content, opts) => {
+      rec.relayed.push({ jid, content, opts });
+      return { key: { remoteJid: jid, fromMe: true, id: 'R' + rec.relayed.length } };
     },
     groupParticipantsUpdate: async (jid, parts, action) => {
       rec.kicks.push({ jid, participants: parts, action });

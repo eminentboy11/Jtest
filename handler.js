@@ -169,8 +169,8 @@ function optionalModule(spec) {
 // on the next hot reload, with no edit to this handler.
 function loadGameModules() {
   return {
-    bomb: optionalModule('./commands/fun/bomb'),
-    tictactoe: optionalModule('./commands/fun/tictactoe'),
+    // Only the rich-app games live here. bomb and tictactoe were plain-text
+    // games and are not part of this edition.
     ttt2: optionalModule('./commands/fun/ttt2'),
   };
 }
@@ -629,14 +629,10 @@ const handleMessage = async (sock, msg) => {
     if (!msg.message) return;
 
 
-    // Store message for antidelete and antiedit
+    // Store message for antidelete (antiedit was removed entirely)
     try {
       const antidelete = commands.get('antidelete');
       if (antidelete?.storeMessage) antidelete.storeMessage(msg);
-    } catch (_) {}
-    try {
-      const antiedit = commands.get('antiedit');
-      if (antiedit?.storeMessage) antiedit.storeMessage(msg);
     } catch (_) {}
 
     // Cache view-once messages so emoji reactions can look them up later
@@ -680,21 +676,6 @@ const handleMessage = async (sock, msg) => {
     const from = (!_rawFrom.endsWith('@g.us') && _rawFrom.endsWith('@lid') && msg.key.remoteJidAlt)
       ? msg.key.remoteJidAlt
       : _rawFrom;
-
-    // Status updates are filtered from normal command processing, but the
-    // auto-download-status command needs to see them first. Its SQLite
-    // status_downloads guard makes this safe alongside index.js's status hook.
-    if (_rawFrom === 'status@broadcast') {
-      try {
-        const statusCommand = commands.get('autodownloadstatus');
-        if (statusCommand?.handleAutoDownloadStatus) {
-          await statusCommand.handleAutoDownloadStatus(sock, msg.key, msg.message);
-        }
-      } catch (error) {
-        console.error('[AutoDL-Status hook]', error.message);
-      }
-      return;
-    }
 
     // System message filter - ignore broadcast/status/newsletter messages
     if (isSystemJid(_rawFrom)) {
@@ -847,8 +828,8 @@ const handleMessage = async (sock, msg) => {
 
       } else if (buttonId === 'btn_help') {
         const extra = await makeExtra();
-        const listCmd = commands.get('list');
-        if (listCmd) await listCmd.execute(sock, msg, [], extra);
+        const helpCmd = commands.get('help');
+        if (helpCmd) await helpCmd.execute(sock, msg, [], extra);
         return;
       }
 
@@ -1042,42 +1023,12 @@ const handleMessage = async (sock, msg) => {
     // A failure in an optional game module must not take down message handling,
     // so the whole group stays wrapped.
     try {
-      if (gameModules.bomb?.gameState?.has(sender)) {
-        const bombCommand = commands.get('bomb');
-        if (bombCommand?.execute) {
-          await bombCommand.execute(sock, msg, [], await makeExtra());
-          return;   // consumed as a game move, not a command
-        }
-      }
-
-      if (hasActiveGameRoom(gameModules.tictactoe, 'handleTicTacToeMove', 'tictactoe', sender)) {
-        const handled = await gameModules.tictactoe.handleTicTacToeMove(sock, msg, await makeExtra());
-        if (handled) return;
-      }
-
       if (hasActiveGameRoom(gameModules.ttt2, 'handleTtt2Move', 'ttt2', sender)) {
         const handled = await gameModules.ttt2.handleTtt2Move(sock, msg, await makeExtra());
         if (handled) return;
       }
     } catch (e) {
       // An optional game module erroring is not worth failing the message over.
-    }
-
-    // Fancy text style selection: reply to fancy list with just a number
-    if (/^\d+$/.test(body.trim())) {
-      const quotedMsg = msg.message?.extendedTextMessage?.contextInfo?.quotedMessage;
-      const quotedText = quotedMsg?.conversation || quotedMsg?.extendedTextMessage?.text || '';
-      if (quotedText.includes('Fancy Text Styles') || quotedText.includes('Fancy Styles for:')) {
-        const fancyCmd = commands.get('fancy');
-        if (fancyCmd) {
-          return fancyCmd.execute(sock, msg, [body.trim()], {
-            from,
-            sender,
-            reply: (text) => sock.sendMessage(from, { text }, { quoted: msg }),
-            react: (emoji) => sock.sendMessage(from, { react: { text: emoji, key: msg.key } }),
-          });
-        }
-      }
     }
 
     // My groups: reply to group list with just a number to get group details

@@ -107,9 +107,9 @@ describe('the shipped commands', () => {
 });
 
 describe('removed commands fall through silently', () => {
-  const gone = ['.menu', '.play', '.sticker', '.ai', '.fancy', '.vv', '.save', '.mygroups',
-    '.list', '.antilink', '.antibadword', '.groupstats', '.logomenu', '.docconvert',
-    '.tictactoe', '.bomb', '.antidelete', '.antiedit', '.anticall', '.antibug'];
+  const gone = ['.play', '.fancy', '.list', '.antilink', '.antibadword', '.groupstats',
+    '.logomenu', '.docconvert', '.tictactoe', '.bomb', '.antiedit', '.anticall',
+    '.antibug', '.autodownloadstatus'];
 
   for (const name of gone) {
     test(`${name} produces no crash and no user-visible output`, async () => {
@@ -182,6 +182,71 @@ describe('group traffic', () => {
     await H.sleep(100);
     const day = database.runAsBot(B, () => database.getGroupStat(H.GROUP, today));
     assert.ok(day && day.total >= 4, `expected >=4, got ${day?.total}`);
+  });
+});
+
+describe('the restored commands respond', () => {
+  test('.menu lists loaded commands and never absent ones', async () => {
+    const s = H.makeDmSock();
+    await run(s, H.textMsg('.menu', { dm: true }));
+    await H.sleep(200);
+    assert.equal(s._rec.texts.length, 1, JSON.stringify(s._rec.texts));
+    const text = s._rec.texts[0];
+    for (const n of ['.menu', '.ping', '.sticker', '.antidelete', '.ttt2']) {
+      assert.ok(text.includes(n), `menu must list ${n}`);
+    }
+    // Entry lines start at column 2; descriptions may mention other commands
+    // in prose (ttt2's does), so only the entry lines count as advertising.
+    for (const absent of ['.fancy', '.bomb', '.tictactoe', '.play']) {
+      assert.ok(!new RegExp(`^\\s{2}\\${absent}\\b`, 'm').test(text),
+        `menu must not advertise ${absent}`);
+    }
+  });
+
+  test('.chatbot status reports the missing key instead of crashing', async () => {
+    const s = H.makeSock();   // group: sender below is an admin, so the gate passes
+    await run(s, H.textMsg('.chatbot status', { sender: H.ADMIN }));
+    await H.sleep(200);
+    assert.equal(s._rec.texts.length, 1, JSON.stringify(s._rec.texts));
+    assert.ok(/Chatbot/.test(s._rec.texts[0]), s._rec.texts[0]);
+    assert.ok(/MISSING/.test(s._rec.texts[0]), 'no CHATBOT_API_KEY in tests, so it must say MISSING');
+  });
+
+  test('.chatbot refuses non-admins', async () => {
+    const s = H.makeSock();
+    await run(s, H.textMsg('.chatbot on', { sender: H.MEMBER }));
+    await H.sleep(200);
+    assert.equal(s._rec.texts.length, 1, JSON.stringify(s._rec.texts));
+    assert.ok(/Admins only/.test(s._rec.texts[0]), s._rec.texts[0]);
+    // chatbot defaults to false in DEFAULT_GROUP_SETTINGS; a refused toggle
+    // must leave it there. Read under the bot the dispatch ran as.
+    const on = database.runAsBot(A, () => database.getGroupSettings(H.GROUP).chatbot);
+    assert.equal(on, false, 'a refused toggle must not enable the chatbot');
+  });
+
+  test('.vv without a quoted view-once asks for one', async () => {
+    const s = H.makeDmSock();
+    await run(s, H.textMsg('.vv', { dm: true }));
+    await H.sleep(200);
+    assert.equal(s._rec.texts.length, 1, JSON.stringify(s._rec.texts));
+    assert.ok(/view-once/.test(s._rec.texts[0]), s._rec.texts[0]);
+  });
+
+  test('.save without a quoted status asks for one', async () => {
+    const s = H.makeDmSock();
+    await run(s, H.textMsg('.save', { dm: true }));
+    await H.sleep(200);
+    assert.equal(s._rec.texts.length, 1, JSON.stringify(s._rec.texts));
+    assert.ok(/status/.test(s._rec.texts[0]), s._rec.texts[0]);
+  });
+
+  test('.help answers with the rich card or its fallback, never a crash', async () => {
+    const s = H.makeDmSock();
+    await run(s, H.textMsg('.help', { dm: true }));
+    await H.sleep(250);
+    assert.ok(s._rec.texts.length >= 0); // rich path uses relayMessage, not sendMessage
+    assert.ok(s._rec.relayed ? s._rec.relayed.length >= 1 : s._rec.texts.length >= 1,
+      'help must produce either a relayed rich message or a fallback text');
   });
 });
 

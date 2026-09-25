@@ -1,0 +1,73 @@
+<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>
+*{box-sizing:border-box}html,body{margin:0;width:100%;background:transparent;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;overflow-x:hidden}
+body{padding:10px}.card{max-width:340px;margin:0 auto;padding:12px;border-radius:16px;background:#080d0b;color:#d9fbe6;box-shadow:0 6px 18px #0008;border:1px solid #123b25}
+h1{margin:0;font-size:15px;color:#39e889;letter-spacing:.5px}.sub{margin:2px 0 8px;font-size:11px;color:#6fae8c}
+#q{width:100%;padding:9px 12px;font-size:13px;border-radius:10px;border:1px solid #1d7347;background:#0b130f;color:#d9fbe6;outline:none}
+#chips{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
+.chip{padding:5px 10px;font-size:11px;border-radius:999px;border:1px solid #123b25;background:#0b130f;color:#9ed8b4;cursor:pointer}
+.chip.on{background:#123b25;border-color:#39e889;color:#c9f7dd}
+#list{max-height:380px;overflow-y:auto;-webkit-overflow-scrolling:touch}
+#scrollRow{display:flex;justify-content:space-between;margin-top:6px}
+.scrollBtn{width:38px;height:32px;border-radius:10px;border:1px solid #39e889;background:#0b130f;color:#39e889;font-size:14px;display:flex;align-items:center;justify-content:center;cursor:pointer;user-select:none}
+.scrollBtn:active{background:#123b25}
+.cmd{border:1px solid #123b25;border-radius:10px;padding:8px 10px;margin-bottom:6px;cursor:pointer;background:#0b130f}
+.cmd .nm{font-size:13px;font-weight:700;color:#c9f7dd}.cmd .cnt{float:right;font-size:10px;color:#4d8a6a}
+.cmd .ds{display:none;font-size:11px;color:#9ed8b4;margin-top:5px;line-height:1.4}
+.cmd .us{display:none;font-size:12px;color:#39e889;margin-top:3px;font-weight:600}
+.cmd .al{display:none;font-size:10px;color:#6fae8c;margin-top:3px}
+.cmd.open .ds,.cmd.open .us,.cmd.open .al{display:block}
+.empty{text-align:center;font-size:12px;color:#4d8a6a;padding:14px 0}
+.foot{margin:8px 0 0;text-align:center;font-size:10px;color:#4d8a6a}
+</style></head><body><div class="card">
+<h1>🔥 JUNE-X MINI MENU <span style="font-size:9px;color:#f2b134">BETA</span></h1>
+<p class="sub">tappable commands · search · category chips</p>
+<input id="q" placeholder="Search commands…">
+<div id="chips"></div>
+<div id="list"></div>
+<div id="scrollRow">
+<div class="scrollBtn" id="upBtn">▲</div>
+<div class="scrollBtn" id="downBtn">▼</div>
+</div>
+<p class="foot" id="foot"></p>
+</div><script>
+(function(){
+'use strict';
+var D=__MENUDATA__;
+var cats=Object.keys(D.cats||{}), active='all', q='';
+var chipsEl=document.getElementById('chips'), listEl=document.getElementById('list'), footEl=document.getElementById('foot');
+function chipLabel(c){return c==='all'?('All ('+countAll()+')'):(c+' ('+D.cats[c].length+')');}
+function countAll(){var n=0;for(var k in D.cats)n+=D.cats[k].length;return n;}
+function renderChips(){chipsEl.innerHTML='';var all=['all'].concat(cats);
+ all.forEach(function(c){var b=document.createElement('div');b.className='chip'+(c===active?' on':'');b.textContent=chipLabel(c);
+  b.onclick=function(){active=c;renderChips();renderList();};chipsEl.appendChild(b);});}
+function renderList(){listEl.innerHTML='';var shown=0;
+ cats.forEach(function(c){if(active!=='all'&&active!==c)return;
+  D.cats[c].forEach(function(cmd){
+   var hay=(c+' '+cmd.n+' '+cmd.a.join(' ')+' '+cmd.d).toLowerCase();
+   if(q&&hay.indexOf(q)<0)return;
+   shown++;var el=document.createElement('div');el.className='cmd';
+   el.innerHTML='<span class="nm">'+D.prefix+cmd.n+'</span><span class="cnt">'+c+'</span>'+
+    '<div class="ds">'+(cmd.d||'No description')+'</div>'+
+    '<div class="us">'+(cmd.u||D.prefix+cmd.n)+'</div>'+
+    (cmd.a.length?(' <div class="al">aka: '+cmd.a.map(function(a){return D.prefix+a}).join(' · ')+'</div>'):'');
+   el.onclick=function(){el.classList.toggle('open')};
+   listEl.appendChild(el);});});
+ if(!shown)listEl.innerHTML='<div class="empty">No commands match "'+q.replace(/</g,'&lt;')+'"</div>';
+ footEl.textContent=shown+' of '+countAll()+' commands · tap a command for details';}
+document.getElementById('q').addEventListener('input',function(e){q=e.target.value.trim().toLowerCase();renderList();});
+
+function setupScrollBtn(btn,dir){
+ var timer=null;
+ function step(){listEl.scrollTop+=dir*60;}
+ function start(e){e.preventDefault();step();timer=setInterval(step,150);}
+ function stop(){clearInterval(timer);timer=null;}
+ btn.addEventListener('touchstart',start,{passive:false});
+ btn.addEventListener('mousedown',start);
+ ['touchend','touchcancel','mouseup','mouseleave'].forEach(function(ev){btn.addEventListener(ev,stop);});
+}
+setupScrollBtn(document.getElementById('upBtn'),-1);
+setupScrollBtn(document.getElementById('downBtn'),1);
+
+renderChips();renderList();
+})();
+</script></body></html>
