@@ -117,6 +117,15 @@ async function bootBot(botId, opts = {}) {
     if (!bot) throw new Error(`Unknown bot ${botId}`);
     if (bot.sock && bot.state === 'connected' && !opts.force) return bot;
 
+    // Boot generations: every in-flight flow (pairing timer, reconnect delay,
+    // socket callbacks) belongs to the generation that started it. A purge or a
+    // newer boot bumps the generation / drops the map entry, and stale flows
+    // must fall silent instead of talking on a dead socket — that is how a
+    // purged bot kept requesting pairing codes after its own funeral.
+    bot.bootGen = (bot.bootGen || 0) + 1;
+    const gen = bot.bootGen;
+    const stale = () => bots.get(bot.id) !== bot || bot.bootGen !== gen;
+
     bot.state = 'connecting';
     bot.lastError = null;
     bot.reconnectCount = bot.reconnectCount || 0;
@@ -153,6 +162,7 @@ async function bootBot(botId, opts = {}) {
     sock.ev.on('creds.update', saveCreds);
 
     const attemptPairingCode = async () => {
+        if (stale()) return;
         if (bot.pairing._requested) return;
         if (bot.pairing.lastCode) return;
         if (!bot.phone || bot.mode !== 'code') return;
@@ -161,8 +171,13 @@ async function bootBot(botId, opts = {}) {
         try {
             if (!bot.pairing.active) { bot.pairing.active = true; bot.pairing.gen += 1; }
             const cleanPhone = String(bot.phone).replace(/\D/g, '');
+            if (cleanPhone.length < 7 || cleanPhone.length > 15) {
+                console.log(`[ ${bot.id} ] Stored phone "${cleanPhone || '(empty)'}" is not a valid number — skipping pairing code`);
+                return;
+            }
             console.log(`[ ${bot.id} ] Waiting 3s for socket to stabilize...`);
             await delay(3000);
+            if (stale()) return;
             if (bot.state === 'connected') return;
             console.log(`[ ${bot.id} ] Requesting pairing code for ${cleanPhone} (attempt ${bot.pairing.attempts+1}/3)`);
             const rawCode = await sock.requestPairingCode(cleanPhone);
@@ -221,6 +236,7 @@ async function bootBot(botId, opts = {}) {
             }
 
             if (connection === 'close') {
+                if (stale()) return;   // purged or rebooted elsewhere; this socket is history
                 const reason = lastDisconnect?.error?.message || 'unknown';
                 console.log(`[ ${bot.id} ] Close: status=${statusCode} reason=${reason} pairingDone=${bot.pairingDone}`);
 
@@ -241,6 +257,7 @@ async function bootBot(botId, opts = {}) {
                         bot.state = 'connecting';
                         bot.lastError = '401 conflict (takeover)';
                         await delay(15000);
+                        if (stale()) return;
                         bootBot(bot.id, { force: true }).catch(e => console.log(`[ ${bot.id} ] Conflict reconnect failed: ${e.message}`));
                         return;
                     }
@@ -259,6 +276,7 @@ async function bootBot(botId, opts = {}) {
                 console.log(`[ ${bot.id} ] Reconnect #${bot.reconnectCount} in 5s (status ${statusCode}) ${reason}`);
                 bot.state = 'connecting';
                 await delay(5000);
+                if (stale()) return;
                 bootBot(bot.id, { force: true }).catch(e => console.log(`[ ${bot.id} ] Reconnect failed: ${e.message}`));
             }
         } catch (e) { console.log(`[ ${bot.id} ] conn.update error: ${e.message}`); }
@@ -272,6 +290,7 @@ async function bootBot(botId, opts = {}) {
 
     if (bot.mode === 'code' && bot.phone) {
         setTimeout(() => {
+            if (stale()) return;
             if (bot.state !== 'connected' && !bot.pairing._requested && !bot.pairing.lastCode) {
                 console.log(`[ ${bot.id} ] QR not received, fallback requesting pairing code...`);
                 attemptPairingCode();
