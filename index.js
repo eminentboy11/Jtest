@@ -5,6 +5,10 @@
  */
 'use strict';
 require('dotenv').config();
+// libsignal (bundled with Baileys) logs session churn straight to console.*,
+// bypassing the pino logger, and the SessionEntry dumps flood hosted consoles.
+// Must run before any socket is created; JUNE_LIBSIGNAL_LOG=1 disables it.
+require('./utils/silenceLibsignal').install();
 const fs = require('fs');
 const path = require('path');
 const http = require('http');
