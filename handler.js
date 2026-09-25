@@ -1102,25 +1102,6 @@ const handleMessage = async (sock, msg) => {
                     return;
                 }
 
-                // ── Sticker / emoji reply to a status → save to bot self-chat ──
-                if (_ctx?.remoteJid === 'status@broadcast') {
-                    try {
-                        const saveCmd = commands.get('save');
-                        if (saveCmd?.execute) {
-                            await saveCmd.execute(sock, msg, [], {
-                                from,
-                                sender,
-                                isOwner: msg.key.fromMe || isOwner(sender) || isSudo(sender),
-                                command: 'save',
-                                forwardToSelf: true,           // sticker/emoji detected here — forward to selfJid
-                                triggerLabel: _isSticker ? '🎭 *Trigger:* Sticker' : `💌 *Emoji:* ${_t}`,
-                                reply: (text) => sock.sendMessage(from, { text }, { quoted: msg }),
-                                react:  (emoji) => sock.sendMessage(from, { react: { text: emoji, key: msg.key } }),
-                            });
-                        }
-                    } catch (_e) {}
-                    return;
-                }
             }
         }
     }
