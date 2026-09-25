@@ -26,6 +26,9 @@ const RAW_PORT = process.env.SERVER_PORT || process.env.PTERODACTYL_PORT || proc
 const PORT = Number(RAW_PORT) || 3000;
 const MAX_BOTS = 100; // Web edition multi-session — WDP full per bot, 100+ bots capable
 
+global.__CORE__ = __dirname;
+global.__ROOT__ = __dirname;
+
 const DATA_DIR = path.join(process.cwd(), 'data');
 const AUTH_ROOT = path.join(process.cwd(), 'auth');
 fs.mkdirSync(DATA_DIR, { recursive: true });
