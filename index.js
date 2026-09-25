@@ -221,7 +221,7 @@ function detectPlatform() {
                     const selfJid = sock.user?.id ? sock.user.id.split(':')[0] + '@s.whatsapp.net' : null;
                     const prefix = database.getBotSetting('prefix') === '' ? 'none' : (database.getBotSetting('prefix') || '.')
         global.platform = detectPlatform()
-        const ownerName = (Array.isArray(juneDatabase.getOwnerNames()) ? database.getOwnerNames()[0] : database.getOwnerNames()) || 'Bot Owner'
+        const ownerName = (Array.isArray(database.getOwnerNames()) ? database.getOwnerNames()[0] : database.getOwnerNames()) || 'Bot Owner'
 const welcomeText = applyFont(
 `┏━━━✧ JUNE X WEB ✧━━━━
 ┃✧ Bot: ${database.getBotSetting('botName')}
