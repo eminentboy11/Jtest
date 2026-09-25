@@ -3,7 +3,7 @@
  */
 
 const database = require('./database');
-const { loadCommands, watchCommands } = require('./utils/commandLoader');
+const { loadCommands, watchCommands, swapInto } = require('./utils/commandLoader');
 const commandToggle = require('./utils/commandToggle');
 const { addMessage, getActiveUsers, getInactiveUsers } = require('./utils/groupstats');
 const { jidDecode, jidEncode } = require('@whiskeysockets/baileys');
@@ -127,14 +127,14 @@ async function revealVoToDM(sock, originalMsg, targetJid) {
   }
 }
 
-// Load all commands
+// Load all commands. This is the single command Map for the whole process —
+// index.js reads counts back via getCommandCount() instead of loading a second
+// copy, which would double the dispatch table and start a second watcher.
 const commands = loadCommands();
 watchCommands((freshCommands) => {
-  // Keep the same Map instance because the handler references it throughout.
-  commands.clear();
-  for (const [name, command] of freshCommands) {
-    commands.set(name, command);
-  }
+  // Same Map instance, because the handler references it throughout; swapInto
+  // replaces the entries and recomputes the non-enumerable counts.
+  swapInto(commands, freshCommands);
   if (typeof global.invalidateSettingsCache === 'function') {
     global.invalidateSettingsCache();
   }

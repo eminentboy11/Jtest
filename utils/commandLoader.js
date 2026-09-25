@@ -1,218 +1,205 @@
+'use strict';
+
 /**
- * Command Loader - Separate module to avoid circular dependencies
+ * Command loader.
  *
- * Hot-reload capable.  `loadCommands()` builds a Map<name|alias, command>.
- * `watchCommands(callback)` watches the commands/ tree and re-loads fresh
- * copies of any changed .js file, then hands the rebuilt Map to the callback
- * so the bot picks up edits WITHOUT restarting the server.
+ *   loadCommands()     -> Map<name|alias, command>   walks commands/ recursively
+ *   reloadCommands()   -> clears the require cache and returns a fresh Map
+ *   watchCommands(cb)  -> hot-reloads on file changes (debounced), so a new
+ *                         command file works without restarting the server
+ *   swapInto(live,fresh)-> in-place hot-reload of a Map callers already hold
+ *   clearCommandCache()-> drops the commands subtree from require.cache
  *
- * - No extra dependency: uses Node's built-in fs.watch (recursive).
- *   (Node >= 20 supports recursive watching on Linux/macOS; the repo's
- *   `engines` already require Node >= 20.)
- * - On change we clear the require cache for the entire commands subtree,
- *   so `require()` re-reads the edited file from disk.
- * - Events are debounced (filesystem watchers often fire bursts).
- * - Safe while a command is mid-execution: the live Map is mutated in-place
- *   (same instance) so in-flight handlers keep working; the next call just
- *   resolves to the new version.
+ * One Map is the whole dispatch table: it holds each command under its real
+ * name AND under every alias. Because `.size` therefore overstates the command
+ * total, accurate counts are attached as non-enumerable props:
+ *
+ *   map.commandCount   real commands
+ *   map.aliasCount     alias entries
+ *
+ * handler.js owns the single live Map and mutates it in place on hot-reload, so
+ * handlers already mid-execution keep working; the next dispatch just resolves
+ * to the new version.
  */
 
 const fs = require('fs');
 const path = require('path');
 
 const COMMANDS_PATH = path.join(__dirname, '..', 'commands');
+const EXT = '.js';
 
-// Only consider these roots; skip our own transient/temp files if any.
-const SCRIPT_EXT = '.js';
-
-// ── Helpers ────────────────────────────────────────────────────────────────
-
-// List of category folders currently present (each holds commands).
-function listCategories() {
-  if (!fs.existsSync(COMMANDS_PATH)) return [];
-  return fs.readdirSync(COMMANDS_PATH);
+// Collect every .js file under `dir`, at any depth.
+function walk(dir, out = []) {
+  let entries;
+  try {
+    entries = fs.readdirSync(dir, { withFileTypes: true });
+  } catch (_) {
+    return out; // unreadable or deleted mid-scan
+  }
+  for (const entry of entries) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) walk(full, out);
+    else if (entry.isFile() && entry.name.endsWith(EXT)) out.push(full);
+  }
+  return out;
 }
 
-// Clear the require cache for every loaded command file (+ the whole subtree).
+// Drop the whole commands subtree from require.cache so `require()` re-reads
+// edited files from disk.
 function clearCommandCache() {
-  const prefix = COMMANDS_PATH;
   for (const id of Object.keys(require.cache)) {
-    if (id.startsWith(prefix) && id.endsWith(SCRIPT_EXT)) {
-      delete require.cache[id];
-    }
+    if (id.startsWith(COMMANDS_PATH) && id.endsWith(EXT)) delete require.cache[id];
   }
 }
 
-// Load all commands from disk (fresh `require` calls).
-function loadCommands() {
-  const commands = new Map();
-  const commandsPath = COMMANDS_PATH;
+// Register one command object (and its aliases) into the dispatch table.
+function register(commands, command, category, source) {
+  // The containing folder is the single source of truth for the category.
+  // Trusting a hand-written `category:` field let files drift into the wrong
+  // menu section, and a *missing* field produced an "UNDEFINED-CMD" section.
+  command.category = category;
+  command.__source = source;
 
-  if (!fs.existsSync(commandsPath)) {
-    console.log('Commands directory not found');
-    return commands;
+  // Registration is last-write-wins, so a duplicate name would silently replace
+  // an earlier command. Surface it instead of hiding it.
+  const prior = commands.get(command.name);
+  if (prior && prior.name === command.name) {
+    console.warn(
+      `[ COMMANDS ] Duplicate name "${command.name}": ${source} overrides ${prior.__source || 'earlier command'}`
+    );
   }
+  commands.set(command.name, command);
 
-  const categories = fs.readdirSync(commandsPath);
-
-  categories.forEach(category => {
-    const categoryPath = path.join(commandsPath, category);
-    let stat;
-    try {
-      stat = fs.statSync(categoryPath);
-    } catch (_) {
-      return; // may have been deleted mid-scan
+  for (const alias of command.aliases || []) {
+    const clash = commands.get(alias);
+    // A command listing its own name in `aliases` is harmless — it just
+    // re-points the same key at the same object.
+    if (clash === command) continue;
+    if (clash && clash.name === alias) {
+      console.warn(
+        `[ COMMANDS ] Alias "${alias}" of ${source} shadows the real command "${alias}" (${clash.__source}) — alias skipped`
+      );
+      continue; // never let an alias bury a first-class command
     }
-    if (stat.isDirectory()) {
-      let files = [];
-      try {
-        files = fs.readdirSync(categoryPath).filter(f => f.endsWith(SCRIPT_EXT));
-      } catch (_) { return; }
-
-      files.forEach(file => {
-        const fullPath = path.join(categoryPath, file);
-        try {
-          const exported = require(fullPath);
-          const cmds = Array.isArray(exported) ? exported : [exported];
-          cmds.forEach(command => {
-            if (command && command.name) {
-              // The containing folder is the single source of truth for the
-              // category. Trusting a hand-written `category:` field let files
-              // drift into the wrong menu section (e.g. general/antibug.js
-              // declaring `owner`), and a *missing* field produced the
-              // "UNDEFINED-CMD" section in .menu.
-              command.category = category;
-
-              // Registration is last-write-wins, so a duplicate name silently
-              // replaces an earlier command. Surface it instead of hiding it.
-              const prior = commands.get(command.name);
-              if (prior && prior.name === command.name) {
-                console.warn(
-                  `[ COMMANDS ] Duplicate name "${command.name}": ` +
-                  `${category}/${file} overrides ${prior.__source || 'earlier command'}`
-                );
-              }
-              command.__source = `${category}/${file}`;
-              commands.set(command.name, command);
-
-              if (command.aliases) {
-                command.aliases.forEach(alias => {
-                  const clash = commands.get(alias);
-                  // A command listing its own name in `aliases` is harmless
-                  // (it just re-points the same key at the same object).
-                  if (clash === command) return;
-                  if (clash && clash.name === alias) {
-                    console.warn(
-                      `[ COMMANDS ] Alias "${alias}" of ${category}/${file} ` +
-                      `shadows the real command "${alias}" (${clash.__source}) — alias skipped`
-                    );
-                    return; // never let an alias bury a first-class command
-                  }
-                  commands.set(alias, command);
-                });
-              }
-            }
-          });
-        } catch (error) {
-          console.error(`Error loading command ${file}:`, error.message);
-        }
-      });
-    }
-  });
-
-  // Honest counts: the Map holds both real command names and aliases (they
-  // share one dispatch table), so .size alone overstates the command total.
-  // Attach the breakdown as non-enumerable props for banners/menus.
-  let commandCount = 0, aliasCount = 0;
-  for (const [key, cmd] of commands) {
-    if (key === cmd.name) commandCount++; else aliasCount++;
+    commands.set(alias, command);
   }
-  Object.defineProperty(commands, 'commandCount', { value: commandCount, enumerable: false });
-  Object.defineProperty(commands, 'aliasCount', { value: aliasCount, enumerable: false });
+}
 
+// Attach accurate counts without making them show up in iteration/JSON.
+// `configurable` is required so swapInto() can refresh them after a hot reload.
+function withCounts(commands) {
+  let commandCount = 0;
+  let aliasCount = 0;
+  for (const [key, command] of commands) {
+    if (key === command.name) commandCount++;
+    else aliasCount++;
+  }
+  const opts = { enumerable: false, configurable: true };
+  Object.defineProperty(commands, 'commandCount', { ...opts, value: commandCount });
+  Object.defineProperty(commands, 'aliasCount', { ...opts, value: aliasCount });
   return commands;
 }
 
-// Rebuild the command map from disk, clearing the cache first so edits are
-// picked up. Returns the fresh Map.
+/**
+ * Replace the contents of `target` with `fresh`, in place.
+ *
+ * Callers (handler.js) hold a long-lived reference to one Map, so a hot reload
+ * must mutate that instance rather than hand back a new one. Plain
+ * clear()+set() copies entries only and silently drops the non-enumerable
+ * counts, leaving getCommandCount() frozen at its boot-time value — so the
+ * counts are recomputed here as part of the swap.
+ *
+ * @param {Map} target live dispatch table to update
+ * @param {Map} fresh  freshly loaded table
+ * @returns {Map} target (same instance, updated)
+ */
+function swapInto(target, fresh) {
+  target.clear();
+  for (const [name, command] of fresh) target.set(name, command);
+  return withCounts(target);
+}
+
+function loadCommands() {
+  const commands = new Map();
+  if (!fs.existsSync(COMMANDS_PATH)) {
+    console.log('[ COMMANDS ] Commands directory not found');
+    return withCounts(commands);
+  }
+
+  for (const file of walk(COMMANDS_PATH)) {
+    const source = path.relative(COMMANDS_PATH, file);
+    // First path segment under commands/ is the category.
+    const category = source.split(path.sep)[0] || 'general';
+
+    let exported;
+    try {
+      exported = require(file);
+    } catch (error) {
+      console.error(`[ COMMANDS ] Failed to load ${source}:`, error.message);
+      continue; // one broken file must never take down the rest
+    }
+
+    for (const command of Array.isArray(exported) ? exported : [exported]) {
+      if (command?.name) register(commands, command, category, source);
+    }
+  }
+
+  return withCounts(commands);
+}
+
+// Rebuild from disk, clearing the cache first so edits are picked up.
 function reloadCommands() {
   clearCommandCache();
   return loadCommands();
 }
 
-// ── Watcher ────────────────────────────────────────────────────────────────
-
 /**
- * Watch the commands/ tree for changes and hot-reload.
+ * Watch commands/ and hot-reload.
  *
- * @param {(freshCommands: Map) => void} callback  called with the rebuilt Map
- *        whenever a .js command file changes (debounced).
- * @param {object} [opts]
- * @param {number} [opts.debounceMs=250]           ms to wait after the last event
- * @returns {{ close: () => void }}  a handle to stop watching.
+ * @param {(freshCommands: Map) => void} callback receives the rebuilt Map
+ * @param {object}   [opts]
+ * @param {number}   [opts.debounceMs=250] ms to wait after the last fs event
+ * @returns {{ close: () => void }} handle to stop watching
  */
 function watchCommands(callback, opts = {}) {
   const debounceMs = typeof opts.debounceMs === 'number' ? opts.debounceMs : 250;
   let timer = null;
   let watcher = null;
 
-  const reload = (changedFile) => {
-    try {
-      const fresh = reloadCommands();
-      if (typeof callback === 'function') callback(fresh);
-      console.log(
-        `[ COMMANDS ] Hot-reloaded ${fresh.size} command${fresh.size === 1 ? '' : 's'} ` +
-        `(changed: ${changedFile})`
-      );
-    } catch (error) {
-      console.error('[ COMMANDS ] Hot-reload failed:', error.message);
-      // Keep the previous command set intact on failure.
-    }
-  };
-
   const scheduleReload = (changedFile) => {
-    if (timer) clearTimeout(timer);
-    timer = setTimeout(() => reload(changedFile), debounceMs);
+    if (timer) clearTimeout(timer); // filesystem watchers fire in bursts
+    timer = setTimeout(() => {
+      timer = null;
+      try {
+        const fresh = reloadCommands();
+        if (typeof callback === 'function') callback(fresh);
+        console.log(`[ COMMANDS ] Hot-reloaded ${fresh.commandCount} commands (${changedFile})`);
+      } catch (error) {
+        // Keep the previous command set intact on failure.
+        console.error('[ COMMANDS ] Hot-reload failed:', error.message);
+      }
+    }, debounceMs);
   };
 
   try {
-    // fs.watch with recursive:true works on Node >= 20 for Linux/macOS.
-    watcher = fs.watch(COMMANDS_PATH, { recursive: true }, (eventType, filename) => {
-      if (!filename) return;
-      const name = String(filename);
-      // Only react to .js files under the commands tree.
-      if (!name.endsWith(SCRIPT_EXT)) return;
-      // Skip our own reference/backup files if users keep them in commands/.
+    // Node >= 20 (pinned by package.json `engines`) supports recursive
+    // fs.watch on Linux, macOS and Windows, so the old per-folder fallback
+    // is dead code and is gone.
+    watcher = fs.watch(COMMANDS_PATH, { recursive: true }, (_eventType, filename) => {
+      const name = String(filename || '');
+      if (!name.endsWith(EXT)) return;
+      // Ignore generated/backup artefacts users may keep alongside commands.
       const lower = name.toLowerCase();
       if (lower.includes('.obfuscated.') || lower.includes('.backup')) return;
       scheduleReload(name);
     });
-  } catch (err) {
-    // Fallback: recursive watch not supported (e.g. older Node/plattform).
-    // Watch the top-level categories individually.
-    console.warn('[ COMMANDS ] Recursive watch unavailable, falling back to per-folder watch:', err.message);
-    const watchers = [];
-    for (const category of listCategories()) {
-      const dirPath = path.join(COMMANDS_PATH, category);
-      try {
-        const w = fs.watch(dirPath, (eventType, filename) => {
-          const name = String(filename || '');
-          if (name.endsWith(SCRIPT_EXT)) scheduleReload(`${category}/${name}`);
-        });
-        watchers.push(w);
-      } catch (_) { /* ignore unreadable folders */ }
-    }
-    return {
-      close() {
-        if (timer) clearTimeout(timer);
-        for (const w of watchers) try { w.close(); } catch (_) {}
-      },
-    };
+    watcher.on('error', (error) => {
+      console.error('[ COMMANDS ] Watcher error:', error.message);
+    });
+  } catch (error) {
+    // Hot-reload is a convenience, never a boot requirement.
+    console.warn('[ COMMANDS ] Hot-reload unavailable:', error.message);
   }
-
-  watcher.on('error', (err) => {
-    console.error('[ COMMANDS ] Watcher error:', err.message);
-  });
 
   return {
     close() {
@@ -222,4 +209,4 @@ function watchCommands(callback, opts = {}) {
   };
 }
 
-module.exports = { loadCommands, watchCommands, reloadCommands, clearCommandCache };
+module.exports = { loadCommands, reloadCommands, watchCommands, clearCommandCache, swapInto };
