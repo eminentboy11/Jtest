@@ -26,6 +26,7 @@ const { attachPlatform } = require('./platform');
 const registry = require('./platform/registry');
 const sessionService = require('./platform/sessionService');
 const slots = require('./platform/slots');
+const { purgeBot } = require('./platform/purge');
 
 const RAW_PORT = process.env.SERVER_PORT || process.env.PTERODACTYL_PORT || process.env.PORT || '3000';
 const PORT = Number(RAW_PORT) || 3000;
@@ -224,12 +225,27 @@ async function bootBot(botId, opts = {}) {
                 console.log(`[ ${bot.id} ] Close: status=${statusCode} reason=${reason} pairingDone=${bot.pairingDone}`);
 
                 if (statusCode === 401) {
-                    console.log(`[ ${bot.id} ] 401 session invalid — allow new code via UI`);
-                    bot.state = 'waiting';
-                    bot.lastError = `401: ${reason}`;
-                    bot.pairing._requested = false;
-                    bot.pairingDone = false;
-                    bot.reconnectCount = 0;
+                    // WDP's rule (their index.js ~1300): a 401 whose message says
+                    // "conflict" is a device takeover — recoverable, and erasing a
+                    // verified session there destroys a healthy bot. Every other 401
+                    // is a genuine logout: the credentials are dead, so purge
+                    // everything about this botId (memory, auth dir, data file,
+                    // slot, registry) instead of parking a zombie that the next
+                    // restart trips over.
+                    const dmsg = String(
+                        lastDisconnect?.error?.message ||
+                        lastDisconnect?.error?.output?.payload?.message || ''
+                    ).toLowerCase();
+                    if (dmsg.includes('conflict')) {
+                        console.log(`[ ${bot.id} ] 401 conflict — another client took over; session kept, reconnect in 15s`);
+                        bot.state = 'connecting';
+                        bot.lastError = '401 conflict (takeover)';
+                        await delay(15000);
+                        bootBot(bot.id, { force: true }).catch(e => console.log(`[ ${bot.id} ] Conflict reconnect failed: ${e.message}`));
+                        return;
+                    }
+                    console.log(`[ ${bot.id} ] 401 logged out — purging everything for this botId`);
+                    await purgeBot(bot.id, { reason: 'whatsapp-logout-401', bots, authRoot: AUTH_ROOT });
                     return;
                 }
                 if (bot.reconnectCount >= 10) {
