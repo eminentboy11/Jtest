@@ -49,9 +49,8 @@ function flushFileSave() {
 
 function fileSave() {
     _dirty = true;
-    if (_saveTimer) return;
-    _saveTimer = setTimeout(flushFileSave, 250);
-    _saveTimer.unref?.();
+    // WDP-style: immediate save, not debounce — Pterodactyl can kill in 5s, 250ms debounce loses registry
+    flushFileSave();
 }
 
 async function init() {
@@ -107,5 +106,7 @@ async function status() {
 async function close() { flushFileSave(); }
 
 process.once('exit', () => { flushFileSave(); });
+process.on('SIGINT', () => { flushFileSave(); });
+process.on('SIGTERM', () => { flushFileSave(); });
 
 module.exports = { init, ipHash, trackSession, markPaired, markRemoved, getSession, listActive, isWebManaged, status, flush: flushFileSave, close };
