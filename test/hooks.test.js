@@ -62,7 +62,7 @@ const taggingAdmin = () => H.makeMsg({
 
 describe('registration', () => {
   test('all five commands load alongside ping and uptime', () => {
-    assert.equal(handler.getCommandCount(), 30);  // the shipped set, see loader.test.js
+    assert.equal(handler.getCommandCount(), 31);  // the shipped set, see loader.test.js
   });
 
   test('each exposes the hook handler.js calls', () => {
