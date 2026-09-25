@@ -13,7 +13,6 @@ const pino = require('pino');
 
 // WDP core
 const database = require('./database');
-const { loadCommands } = require('./utils/commandLoader');
 
 // Platform (from lite) — web gateway
 const platformBridge = require('./platform/bridge');
@@ -51,21 +50,23 @@ function botStatus(bot) {
 }
 
 // WDP handler — per-bot DB + shared commands (multi-session)
-// Commands loaded once (1151) to save RAM, DB per bot for isolation
-let wdpCommands = null;
+// handler.js owns the single command Map and loads it exactly once. Asking the
+// loader for a second copy here would double the dispatch table and start a
+// second file watcher, so counts are read back from the handler instead.
 let globalHandler = null;
+const commandCount = () => globalHandler?.getCommandCount?.() ?? 0;
+const aliasCount = () => globalHandler?.getAliasCount?.() ?? 0;
+
 function getWdpHandler() {
     if (!globalHandler) {
         try {
-            const { loadCommands } = require('./utils/commandLoader');
-            wdpCommands = loadCommands();
             globalHandler = require('./handler');
-            console.log(`[ WDP ] Handler loaded — ${wdpCommands.size} commands (shared across ${MAX_BOTS} bots)`);
+            console.log(`[ WDP ] Handler loaded — ${commandCount()} commands + ${aliasCount()} aliases (shared across ${MAX_BOTS} bots)`);
         } catch (e) {
             console.log('[ WDP ] Handler load failed:', e.message, e.stack?.slice(0,300));
         }
     }
-    return { handler: globalHandler, commands: wdpCommands };
+    return { handler: globalHandler };
 }
 
 // Per-bot database — each bot gets its own SQLite file: database/<botId>/june-ultra.db
@@ -225,7 +226,7 @@ async function bootBot(botId, opts = {}) {
                 try {
                     const selfJid = sock.user?.id ? sock.user.id.split(':')[0] + '@s.whatsapp.net' : null;
                     if (selfJid) {
-                        await sock.sendMessage(selfJid, { text: `✅ JUNE X WEB EDITION Connected\n\n• Bot: ${bot.id}\n• Number: +${bot.accountNumber}\n• Mode: velvet-sparrow + wdp\n• Commands: ${wdpCommands ? wdpCommands.size : 'loading...'} (full wdp)\n• .ping → pong\n• .help → menu\n\nPaired via :${PORT}/` });
+                        await sock.sendMessage(selfJid, { text: `✅ JUNE X WEB EDITION Connected\n\n• Bot: ${bot.id}\n• Number: +${bot.accountNumber}\n• Mode: velvet-sparrow + wdp\n• Commands: ${commandCount()} (full wdp)\n• .ping → pong\n• .uptime → runtime\n\nPaired via :${PORT}/` });
                     }
                 } catch (e) { console.log(`[ ${bot.id} ] Startup msg failed: ${e.message}`); }
             }
@@ -352,8 +353,8 @@ const app = express();
 const server = http.createServer(app);
 
 (async () => {
-    getWdpHandler(); // preload 1151 commands shared
-    console.log(`[ BOOT ] WDP commands preloaded — ${wdpCommands ? wdpCommands.size : 0}`);
+    getWdpHandler(); // loads handler.js, which owns the single shared command Map
+    console.log(`[ BOOT ] Commands ready — ${commandCount()} commands + ${aliasCount()} aliases`);
 })();
 
 attachPlatform(app, server).then(async () => {
@@ -398,19 +399,19 @@ attachPlatform(app, server).then(async () => {
         console.log(`[ LISTEN ] 0.0.0.0:${PORT}`);
         console.log(`[ GATEWAY ] Pairing UI → /  (at :${PORT}/)`);
         console.log(`[ HEALTH ] :${PORT}/health | :${PORT}/health/details | :${PORT}/status`);
-        console.log(`[ BOTS ] ${bots.size}/${MAX_BOTS} active | WDP: ${wdpCommands ? wdpCommands.size : 'loading...'} commands`);
-        console.log(`[ DB ] Per-bot SQLite — each bot has database/<botId>/june-ultra.db | Shared commands: ${wdpCommands ? wdpCommands.size : 0}`);
+        console.log(`[ BOTS ] ${bots.size}/${MAX_BOTS} active | WDP: ${commandCount()} commands + ${aliasCount()} aliases`);
+        console.log(`[ DB ] Per-bot SQLite — each bot has database/<botId>/june-ultra.db | Shared commands: ${commandCount()}`);
         console.log('='.repeat(60) + '\n');
     });
 }).catch(err => { console.error('[ BOOT ] Platform attach failed:', err); process.exit(1); });
 
 app.get('/health', (_, res) => res.status(200).send('OK'));
 app.get('/health/details', (_, res) => {
-    res.json({ ok: true, web: true, wdp: true, bots: [...bots.values()].map(botStatus), maxBots: MAX_BOTS, commands: wdpCommands ? wdpCommands.size : 0, uptime: process.uptime(), memory: process.memoryUsage() });
+    res.json({ ok: true, web: true, wdp: true, bots: [...bots.values()].map(botStatus), maxBots: MAX_BOTS, commands: commandCount(), aliases: aliasCount(), uptime: process.uptime(), memory: process.memoryUsage() });
 });
 app.get('/status', (_, res) => {
     const list = [...bots.values()].map(b => `<li>${b.id} — ${b.state} — ${b.accountNumber || b.phone || 'no phone'}</li>`).join('');
-    res.send(`<html><head><title>June X Web</title></head><body style="font-family:monospace;background:#03060c;color:#e2f0ff;padding:2rem"><h1>June X WEB EDITION — WDP full + velvet-sparrow</h1><p>${bots.size}/${MAX_BOTS} bots | WDP commands: ${wdpCommands ? wdpCommands.size : 'loading...'}</p><ul>${list || '<li>no bots — pair at /</li>'}</ul><p><a href="/" style="color:#00ffe0">Go to pairing gateway /</a></p></body></html>`);
+    res.send(`<html><head><title>June X Web</title></head><body style="font-family:monospace;background:#03060c;color:#e2f0ff;padding:2rem"><h1>June X WEB EDITION — WDP full + velvet-sparrow</h1><p>${bots.size}/${MAX_BOTS} bots | WDP commands: ${commandCount()}</p><ul>${list || '<li>no bots — pair at /</li>'}</ul><p><a href="/" style="color:#00ffe0">Go to pairing gateway /</a></p></body></html>`);
 });
 
 async function shutdown() {
