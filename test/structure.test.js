@@ -197,7 +197,7 @@ describe('module graph', () => {
     }
     // Exactly two, and both are deliberate:
     //   utils/commandLoader.js - requires the command files it discovers on disk
-    //   handler.js             - optionalModule() for commands/fun/ttt2,
+    //   handler.js             - optionalModule() for commands/games/ttt2,
     //                            which may not exist
     // Anything else doing this would defeat the static graph above.
     assert.deepEqual(dynamic.sort(), [
@@ -211,7 +211,7 @@ describe('module graph', () => {
     const optional = [...src.matchAll(/optionalModule\(\s*'([^']+)'/g)].map((m) => m[1]);
     // Only the rich-app games are optional modules; bomb and tictactoe were
     // plain-text games and are not part of this edition.
-    assert.deepEqual(optional, ['./commands/fun/ttt2']);
+    assert.deepEqual(optional, ['./commands/games/ttt2']);
     // They are resolved through optionalModule() rather than a bare require()
     // inside the message handler, so an absent file costs nothing per message.
     assert.equal(/require\(\s*'\.\/commands\/fun\//.test(src), false,

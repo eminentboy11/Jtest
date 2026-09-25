@@ -136,7 +136,7 @@ const commandWatcher = watchCommands((freshCommands) => {
   // Same Map instance, because the handler references it throughout; swapInto
   // replaces the entries and recomputes the non-enumerable counts.
   swapInto(commands, freshCommands);
-  // Re-resolve the optional game modules too, so dropping commands/fun/bomb.js
+  // Re-resolve the optional game modules too, so dropping commands/games/ttt2.js
   // back in works without a restart.
   gameModules = loadGameModules();
   if (typeof global.invalidateSettingsCache === 'function') {
@@ -171,7 +171,7 @@ function loadGameModules() {
   return {
     // Only the rich-app games live here. bomb and tictactoe were plain-text
     // games and are not part of this edition.
-    ttt2: optionalModule('./commands/fun/ttt2'),
+    ttt2: optionalModule('./commands/games/ttt2'),
   };
 }
 let gameModules = loadGameModules();
