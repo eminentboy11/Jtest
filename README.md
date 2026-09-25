@@ -195,9 +195,10 @@ Only:
 - `PLATFORM_CREATES_PER_HOUR` (default 10)
 - `PLATFORM_MAX_WS_CONNECTIONS` (200)
 - `PLATFORM_MAX_WS_PER_IP` (20)
-- `LOG_LEVEL` (silent/info)
-- `JUNE_DATA_DIR` (default `<repo>/data/bots`) — where the per-bot JSON files live
 - `JUNE_DB_FLUSH_MS` (default 250) — write debounce per bot; raise it on slow disks
+- `JUNE_LIBSIGNAL_LOG` (default off, `1` to enable) — Baileys bundles libsignal, which logs session churn straight to `console.*`, bypassing any logger level. By default the routine lifecycle lines and their multi-line `SessionEntry` dumps are suppressed; decrypt failures and key warnings still print. Set this to `1` to see everything while debugging.
+
+Note: an earlier revision of this README listed `LOG_LEVEL`. Nothing in the code reads it; it has been removed rather than left as a lie.
 
 Fully web-based edition — nothing like switching mode through env.
 
@@ -207,7 +208,7 @@ Fully web-based edition — nothing like switching mode through env.
 npm test
 ```
 
-127 assertions across five suites, using Node's built-in runner — no test framework dependency. Runs serially (`--test-concurrency=1`) because the loader suite writes real temporary files into `commands/`.
+132 assertions across six suites, using Node's built-in runner — no test framework dependency. Runs serially (`--test-concurrency=1`) because the loader suite writes real temporary files into `commands/`.
 
 | suite | covers |
 |---|---|
@@ -216,6 +217,7 @@ npm test
 | `test/dispatch.test.js` | `.ping` / `.uptime` and aliases, removed commands falling through silently, bot-mode gating |
 | `test/loader.test.js` | command discovery, alias shadowing, fault tolerance, hot reload through the live dispatch table |
 | `test/structure.test.js` | whole-repo invariants: syntax, module graph, dependency hygiene, no committed secrets |
+| `test/logging.test.js` | libsignal's session churn staying silenced while decrypt failures still print — driven against the real libsignal `SessionRecord` |
 
 `test/structure.test.js` is the one worth reading if you change the build. It exists because two npm scripts pointed at files that were not in the repo, and nothing caught it:
 
