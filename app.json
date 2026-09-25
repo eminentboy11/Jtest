@@ -1,14 +1,33 @@
 {
-  "name": "JTEST Web Lite — 100+ Bots",
-  "description": "Fully web-based WhatsApp hosting platform — no env sessions, no dev dashboard, file auth, QR/code pairing at /, lite for 100+ bots.",
-  "repository": "https://github.com/eminentboy11/Jtest",
-  "keywords": ["whatsapp", "baileys", "lite", "web", "multi-session"],
+  "name": "June X Ultra",
+  "description": "June X Ultra - WhatsApp MD Multi-Device Bot powered by Baileys",
+  "repository": "",
+  "logo": "",
+  "keywords": [
+    "whatsapp",
+    "baileys",
+    "bot",
+    "node",
+    "md",
+    "june-ultra"
+  ],
   "stack": "heroku-24",
-  "buildpacks": [{ "url": "https://github.com/heroku/heroku-buildpack-nodejs.git" }],
-  "formation": { "web": { "quantity": 1, "size": "basic" } },
+  "buildpacks": [
+    {
+      "url": "https://github.com/heroku/heroku-buildpack-nodejs.git"
+    }
+  ],
+  "formation": {
+    "web": {
+      "quantity": 1,
+      "size": "basic"
+    }
+  },
   "env": {
-    "PLATFORM_MAX_BOTS": { "description": "Max bots this instance can host", "value": "100" },
-    "PLATFORM_SLOT_TTL_MIN": { "description": "Pairing slot lifetime minutes", "value": "15" },
-    "PLATFORM_CREATES_PER_HOUR": { "description": "Creations per IP per hour", "value": "10" }
+    "SESSION_ID": {
+      "description": "Official session mechanism: pair at https://burning-lorena-eminentbo-ede53cc1.koyeb.app/pair and paste the JUNE-X~<handle> it gives you. This is the only session mechanism.",
+      "required": false,
+      "value": ""
+    }
   }
 }
