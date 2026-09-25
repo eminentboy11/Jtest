@@ -24,7 +24,7 @@ const slots = require('./platform/slots');
 
 const RAW_PORT = process.env.SERVER_PORT || process.env.PTERODACTYL_PORT || process.env.PORT || '3000';
 const PORT = Number(RAW_PORT) || 3000;
-const MAX_BOTS = 1; // Web edition single bot for now (wdp single-bot core), but platform supports 100
+const MAX_BOTS = 100; // Web edition multi-session — WDP full per bot, 100+ bots capable
 
 const DATA_DIR = path.join(process.cwd(), 'data');
 const AUTH_ROOT = path.join(process.cwd(), 'auth');
@@ -47,33 +47,70 @@ function botStatus(bot) {
     };
 }
 
-// WDP handler — load once
-let wdpHandler = null;
+// WDP handler — per-bot DB + shared commands (multi-session)
+// Commands loaded once (1151) to save RAM, DB per bot for isolation
 let wdpCommands = null;
+let globalHandler = null;
 function getWdpHandler() {
-    if (!wdpHandler) {
+    if (!globalHandler) {
         try {
-            wdpHandler = require('./handler');
+            const { loadCommands } = require('./utils/commandLoader');
             wdpCommands = loadCommands();
-            console.log(`[ WDP ] Handler loaded — ${wdpCommands.size} commands`);
+            globalHandler = require('./handler');
+            console.log(`[ WDP ] Handler loaded — ${wdpCommands.size} commands (shared across ${MAX_BOTS} bots)`);
         } catch (e) {
-            console.log('[ WDP ] Handler load failed:', e.message);
+            console.log('[ WDP ] Handler load failed:', e.message, e.stack?.slice(0,300));
         }
     }
-    return { handler: wdpHandler, commands: wdpCommands };
+    return { handler: globalHandler, commands: wdpCommands };
+}
+
+// Per-bot database — each bot gets its own SQLite file: database/<botId>/june-ultra.db
+// This is wdp-style but isolated, so 100 bots = 100 DB files, not one shared
+function getBotDatabase(botId) {
+    const botDbDir = path.join(process.cwd(), 'database', String(botId));
+    fs.mkdirSync(botDbDir, { recursive: true });
+    // Clone env to avoid polluting global, but set JUNE_DB_DIR for this bot's DB
+    const originalDir = process.env.JUNE_DB_DIR;
+    try {
+        // Clear require cache for database to get fresh instance with new dir
+        const dbPath = require.resolve('./database');
+        delete require.cache[dbPath];
+        process.env.JUNE_DB_DIR = botDbDir;
+        const db = require('./database');
+        return db;
+    } catch (e) {
+        console.log(`[ DB ] Bot ${botId} DB load failed: ${e.message}`);
+        return null;
+    } finally {
+        if (originalDir) process.env.JUNE_DB_DIR = originalDir;
+        else delete process.env.JUNE_DB_DIR;
+    }
 }
 
 async function handleMessage(bot, sock, msg) {
-    // Use WDP's full handler
     const { handler } = getWdpHandler();
-    if (!handler) return;
+    if (!handler) {
+        console.log(`[ WDP ] No handler for ${bot.id}`);
+        return;
+    }
     try {
-        // WDP handler expects global sock etc., set per bot
         global.currentSock = sock;
         global.botState = bot.state;
-        await handler(sock, msg);
+        global.__BOT_ID__ = bot.id;
+        if (bot.db) {
+            const dbPath = require.resolve('./database');
+            require.cache[dbPath] = { exports: bot.db };
+        }
+        // WDP handler exports { handleMessage, ... } not a function
+        const fn = handler.handleMessage || handler;
+        if (typeof fn !== 'function') {
+            console.log(`[ WDP ] handler type ${typeof handler} keys ${Object.keys(handler).slice(0,5)}`);
+            return;
+        }
+        await fn(sock, msg);
     } catch (e) {
-        console.log(`[ WDP ] handleMessage error: ${e.message}`);
+        console.log(`[ WDP ] handleMessage error for ${bot.id}: ${e.message} ${e.stack?.slice(0,200)}`);
     }
 }
 
@@ -95,6 +132,14 @@ async function bootBot(botId, opts = {}) {
 
     const authDir = path.join(AUTH_ROOT, String(bot.id));
     fs.mkdirSync(authDir, { recursive: true });
+    // Per-bot database (wdp full but isolated)
+    if (!bot.db) {
+        bot.db = getBotDatabase(bot.id);
+        if (bot.db) {
+            await bot.db.ready.catch(e => console.log(`[ DB ] ${bot.id} ready failed: ${e.message}`));
+            console.log(`[ DB ] ${bot.id} SQLite ready — ${bot.db._db ? 'yes' : 'no'} | Dir: database/${bot.id}`);
+        }
+    }
     const { state, saveCreds } = await useMultiFileAuthState(authDir);
     const { version } = await fetchLatestBaileysVersion().catch(() => ({ version: [2, 3000, 1015901307] }));
 
@@ -171,8 +216,8 @@ async function bootBot(botId, opts = {}) {
                 console.log(`[ ${bot.id} ] ✅ Connected as ${bot.accountNumber || sock.user?.id}`);
                 await registry.markPaired(bot.id, bot.accountNumber).catch(() => {});
                 try { slots.setPaired(bot.id, bot.accountNumber); } catch (_) {}
-                // WDP database ready
-                await database.ready.catch(()=>{});
+                // WDP database ready (per-bot)
+                if (bot.db) await bot.db.ready.catch(()=>{});
                 // Send startup message via WDP style
                 try {
                     const selfJid = sock.user?.id ? sock.user.id.split(':')[0] + '@s.whatsapp.net' : null;
@@ -304,8 +349,8 @@ const app = express();
 const server = http.createServer(app);
 
 (async () => {
-    await database.ready.catch(e => console.log('[ DB ] Ready failed:', e.message));
-    getWdpHandler(); // preload commands
+    getWdpHandler(); // preload 1151 commands shared
+    console.log(`[ BOOT ] WDP commands preloaded — ${wdpCommands ? wdpCommands.size : 0}`);
 })();
 
 attachPlatform(app, server).then(async () => {
@@ -347,7 +392,7 @@ attachPlatform(app, server).then(async () => {
         console.log(`[ GATEWAY ] Pairing UI → /  (at :${PORT}/)`);
         console.log(`[ HEALTH ] :${PORT}/health | :${PORT}/health/details | :${PORT}/status`);
         console.log(`[ BOTS ] ${bots.size}/${MAX_BOTS} active | WDP: ${wdpCommands ? wdpCommands.size : 'loading...'} commands`);
-        console.log(`[ DB ] SQLite ready — ${database._db ? 'yes' : 'no'} | Dir: ${process.env.JUNE_DB_DIR || 'database'}`);
+        console.log(`[ DB ] Per-bot SQLite — each bot has database/<botId>/june-ultra.db | Shared commands: ${wdpCommands ? wdpCommands.size : 0}`);
         console.log('='.repeat(60) + '\n');
     });
 }).catch(err => { console.error('[ BOOT ] Platform attach failed:', err); process.exit(1); });
