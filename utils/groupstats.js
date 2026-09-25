@@ -1,27 +1,35 @@
 'use strict';
 
 /**
- * SQLite-backed group activity statistics.
+ * Group activity statistics.
  *
- * Public functions remain synchronous for compatibility with handler.js and
- * existing commands. Message activity is cached in memory and only dirty
- * group/day records are flushed to the main SQLite database every five seconds.
+ * The public functions stay synchronous for compatibility with handler.js and
+ * the commands that read activity reports. Message counts are accumulated in
+ * memory and only the dirty group/day records are written out, on a five second
+ * timer.
  *
- * This module intentionally has no file-based storage path. It never reads,
- * writes, imports, or falls back to a standalone statistics file.
+ * Bot isolation
+ * -------------
+ * The cache is keyed by bot as well as group, and every database call is made
+ * inside database.runAsBot(...). That second part is not decorative: the flush
+ * timer below fires on its own, outside any message's async context, so
+ * database.currentBotId() would resolve to the default bot and pour every bot's
+ * activity into one file. Storing the bot id alongside the dirty record and
+ * re-entering the context at write time is what keeps them apart.
  */
 
 const database = require('../database');
 
 const FLUSH_INTERVAL_MS = 5_000;
+const SEP = '\u0000';
 
-// Map<groupId, Map<YYYY-MM-DD, { total, users, hours }>>
+// Map<scope, Map<YYYY-MM-DD, { total, users, hours }>> where scope is `botId\0groupId`.
 const cache = new Map();
-// Map<groupId, Set<YYYY-MM-DD>> — records awaiting the next SQLite save.
+// Map<scope, Set<YYYY-MM-DD>> — records awaiting the next save.
 const dirtyDays = new Map();
 // Only needed for the tiny startup window before database.ready resolves.
 const preReadyDays = new Map();
-const fullyLoadedGroups = new Set();
+const fullyLoadedScopes = new Set();
 
 let databaseReady = false;
 let flushInProgress = false;
@@ -86,45 +94,54 @@ function normaliseDate(date) {
   return String(date || '');
 }
 
-function getGroupDays(groupId) {
-  const id = normaliseGroupId(groupId);
-  let days = cache.get(id);
+function scopeOf(botId, groupId) {
+  return `${botId}${SEP}${normaliseGroupId(groupId)}`;
+}
+
+function splitScope(scope) {
+  const at = scope.indexOf(SEP);
+  return at === -1
+    ? [database.DEFAULT_BOT_ID, scope]
+    : [scope.slice(0, at), scope.slice(at + 1)];
+}
+
+function getScopeDays(scope) {
+  let days = cache.get(scope);
   if (!days) {
     days = new Map();
-    cache.set(id, days);
+    cache.set(scope, days);
   }
   return days;
 }
 
-function markDay(map, groupId, date) {
-  const id = normaliseGroupId(groupId);
+function markDay(map, scope, date) {
   const day = normaliseDate(date);
-  let dates = map.get(id);
+  let dates = map.get(scope);
   if (!dates) {
     dates = new Set();
-    map.set(id, dates);
+    map.set(scope, dates);
   }
   dates.add(day);
 }
 
 function reportDatabaseError(error) {
-  // Do not turn one SQLite outage into a console line for every group message.
+  // Do not turn one database outage into a console line for every group message.
   const now = Date.now();
   if (now - lastDatabaseErrorAt < 60_000) return;
   lastDatabaseErrorAt = now;
-  console.error('[groupStats] SQLite error:', error?.message || error);
+  console.error('[groupStats] database error:', error?.message || error);
 }
 
-function loadDay(groupId, date) {
-  const id = normaliseGroupId(groupId);
+function loadDay(botId, groupId, date) {
+  const scope = scopeOf(botId, groupId);
   const day = normaliseDate(date);
-  const days = getGroupDays(id);
+  const days = getScopeDays(scope);
 
   if (days.has(day)) return days.get(day);
   if (!databaseReady) return null;
 
   try {
-    const stored = database.getGroupStat(id, day);
+    const stored = database.runAsBot(botId, () => database.getGroupStat(groupId, day));
     if (stored === null) return null;
 
     const stat = normaliseStat(stored);
@@ -136,31 +153,32 @@ function loadDay(groupId, date) {
   }
 }
 
-function ensureDay(groupId, date) {
-  const id = normaliseGroupId(groupId);
+function ensureDay(botId, groupId, date) {
+  const scope = scopeOf(botId, groupId);
   const day = normaliseDate(date);
-  const existing = loadDay(id, day);
+  const existing = loadDay(botId, groupId, day);
   if (existing) return existing;
 
   const stat = { total: 0, users: {}, hours: {} };
-  getGroupDays(id).set(day, stat);
-  if (!databaseReady) markDay(preReadyDays, id, day);
+  getScopeDays(scope).set(day, stat);
+  if (!databaseReady) markDay(preReadyDays, scope, day);
   return stat;
 }
 
-function loadAllGroupDays(groupId) {
-  const id = normaliseGroupId(groupId);
-  const days = getGroupDays(id);
+function loadAllGroupDays(botId, groupId) {
+  const scope = scopeOf(botId, groupId);
+  const days = getScopeDays(scope);
 
-  if (!databaseReady || fullyLoadedGroups.has(id)) return days;
+  if (!databaseReady || fullyLoadedScopes.has(scope)) return days;
 
   try {
-    for (const row of database.getAllGroupStats(id)) {
+    const rows = database.runAsBot(botId, () => database.getAllGroupStats(groupId));
+    for (const row of rows) {
       const day = normaliseDate(row.date);
       // Keep a newer in-memory record if messages have arrived since startup.
       if (!days.has(day)) days.set(day, normaliseStat(row.data));
     }
-    fullyLoadedGroups.add(id);
+    fullyLoadedScopes.add(scope);
   } catch (error) {
     reportDatabaseError(error);
   }
@@ -171,15 +189,16 @@ function loadAllGroupDays(groupId) {
 function reconcilePreReadyDays() {
   if (!databaseReady || preReadyDays.size === 0) return;
 
-  for (const [groupId, dates] of preReadyDays) {
-    const days = getGroupDays(groupId);
+  for (const [scope, dates] of preReadyDays) {
+    const [botId, groupId] = splitScope(scope);
+    const days = getScopeDays(scope);
 
     for (const date of dates) {
       const inMemory = days.get(date);
       if (!inMemory) continue;
 
       try {
-        const stored = database.getGroupStat(groupId, date);
+        const stored = database.runAsBot(botId, () => database.getGroupStat(groupId, date));
         if (stored !== null) days.set(date, mergeStats(stored, inMemory));
       } catch (error) {
         reportDatabaseError(error);
@@ -197,8 +216,9 @@ function flushGroupStats() {
   let saved = 0;
 
   try {
-    for (const [groupId, dates] of [...dirtyDays.entries()]) {
-      const days = getGroupDays(groupId);
+    for (const [scope, dates] of [...dirtyDays.entries()]) {
+      const [botId, groupId] = splitScope(scope);
+      const days = getScopeDays(scope);
 
       for (const date of [...dates]) {
         const stat = days.get(date);
@@ -208,7 +228,9 @@ function flushGroupStats() {
         }
 
         try {
-          database.saveGroupStat(groupId, date, stat);
+          // Re-enter the owning bot's context: this runs from a timer, so
+          // currentBotId() on its own would not know who these counts belong to.
+          database.runAsBot(botId, () => database.saveGroupStat(groupId, date, stat));
           dates.delete(date);
           saved += 1;
         } catch (error) {
@@ -217,7 +239,7 @@ function flushGroupStats() {
         }
       }
 
-      if (dates.size === 0) dirtyDays.delete(groupId);
+      if (dates.size === 0) dirtyDays.delete(scope);
     }
   } finally {
     flushInProgress = false;
@@ -227,14 +249,18 @@ function flushGroupStats() {
 }
 
 // ── Public API ────────────────────────────────────────────────────────────────
+// Each entry point resolves the bot from the ambient context. Calls made from
+// handler.js land inside index.js's database.runAsBot(...) wrapper, so they
+// resolve correctly; calls made anywhere else fall back to the default bot.
 
 function addMessage(groupId, senderId) {
   const id = normaliseGroupId(groupId);
   const sender = String(senderId || '');
   if (!id || !sender) return;
 
+  const botId = database.currentBotId();
   const date = todayKey();
-  const stat = ensureDay(id, date);
+  const stat = ensureDay(botId, id, date);
 
   stat.total += 1;
   stat.users[sender] = (stat.users[sender] || 0) + 1;
@@ -242,17 +268,17 @@ function addMessage(groupId, senderId) {
   const hour = hourKey();
   stat.hours[hour] = (stat.hours[hour] || 0) + 1;
 
-  markDay(dirtyDays, id, date);
+  markDay(dirtyDays, scopeOf(botId, id), date);
 }
 
 function getStats(groupId) {
-  return loadDay(groupId, todayKey());
+  return loadDay(database.currentBotId(), groupId, todayKey());
 }
 
 function getActiveUsers(groupId, limit = 15) {
   const totals = {};
 
-  for (const stat of loadAllGroupDays(groupId).values()) {
+  for (const stat of loadAllGroupDays(database.currentBotId(), groupId).values()) {
     for (const [jid, count] of Object.entries(stat.users || {})) {
       totals[jid] = (totals[jid] || 0) + toCount(count);
     }
@@ -268,7 +294,7 @@ function getActiveUsers(groupId, limit = 15) {
 function getInactiveUsers(groupId, allParticipants) {
   const active = new Set();
 
-  for (const stat of loadAllGroupDays(groupId).values()) {
+  for (const stat of loadAllGroupDays(database.currentBotId(), groupId).values()) {
     for (const jid of Object.keys(stat.users || {})) active.add(jid);
   }
 
@@ -277,12 +303,12 @@ function getInactiveUsers(groupId, allParticipants) {
     : [];
 }
 
-// Same debounce as the previous implementation, but the destination is the
-// main SQLite database instead of a standalone JSON file.
 setInterval(flushGroupStats, FLUSH_INTERVAL_MS).unref();
 
-// index.js already calls this hook before it closes SQLite during graceful
-// shutdown. The prepended exit listener is a small fallback for direct exits.
+// index.js calls this hook during graceful shutdown, before database.flush()
+// writes the store out. The prepended exit listener is a fallback for a direct
+// process.exit() — being prepended, it runs before database.js's own exit
+// handler, so the counts reach the store in time to be written.
 global.__JUNE_FLUSH_GROUP_STATS = flushGroupStats;
 process.prependListener('exit', flushGroupStats);
 

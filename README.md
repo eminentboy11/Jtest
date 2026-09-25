@@ -7,15 +7,29 @@
 Previous edition was **9MB + 700 deps (48 packages, ffmpeg, sharp, jimp, ytdl, scrapers, pdfkit, etc)** + 309 commands loaded in memory + SQLite per bot + message store + group caches = **80-150MB RAM per bot** → 30 bots = 4.5GB.
 
 **Lite is:**
-- **7 deps only**: `baileys, express, qrcode, dotenv, pino, ws, awesome-phonenumber`
-- No `better-sqlite3`, no `ffmpeg-static` (186MB), no `sharp`, no `jimp`, no scrapers, no `moment`, no `mongodb/pg`, no `sql.js`
-- **File auth** `auth/<botId>/creds.json` — no SQLite per bot
-- **No message store**, no group metadata cache, no anti-delete queues, no auto-react, no command loader (only ping)
+- **16 declared deps**, of which 7 are load-bearing for the gateway: `baileys, express, qrcode, dotenv, pino, ws, awesome-phonenumber`
+- **No database engine at all** — no `better-sqlite3`, no `sql.js`, no `mongodb`, no `pg`. Storage is one plain JSON file per bot (see [Data Storage](#data-storage))
+- **No `sharp`, no scrapers, no `moment`** — media/scraper commands were removed with the command purge
+- **File auth** `auth/<botId>/creds.json`
+- **No message store**, no group metadata cache, no anti-delete queues
 - **No dev dashboard** (`/dev` removed), no `logStore`, no MongoDB registry
 - **No JUNE_SESSIONS env** — sessions only via web UI at `/`, persisted in `data/platform-registry.json`
 - **No JUNE_PLATFORM toggle** — always web
+- **2 commands shipped** (`.ping`, `.uptime`) behind a real hot-reloading loader — drop a file in `commands/` and it registers without a restart
 
-**Result:** ~15-25MB per bot → **100 bots ≈ 1.5-2.5GB RAM** (vs 8-15GB before). Fits in 25% of an 8GB VPS (2GB).
+**Measured** (Node 20, `--expose-gc`, 0 bots paired):
+
+| | before | after |
+|---|---|---|
+| Idle RSS, whole app | 99.6 MB | **87.9 MB** |
+| Cold boot to "Server started" | 437 ms | **321 ms** |
+| `database.js` alone — boot | 119 ms | **15 ms** |
+| `database.js` alone — RSS | 57.4 MB | **39.5 MB** |
+| Resident modules for the DB layer | 54 | **4** |
+| Repo JS | 14,773 lines | **8,956 lines** |
+| `node_modules` | 276 MB / 282 pkgs | **230 MB / 240 pkgs** |
+
+**Per bot, once populated** (8 groups × 40 members × 7 days of activity): **+0.41 MB RSS**, **44 KB on disk**. 25 such bots add 10.3 MB total — the database is no longer a scaling factor. Remaining per-bot cost is the Baileys socket itself (~15–25 MB), so a 500 MB VPS realistically carries **~20 bots**, and a 4 GB box ~120–150.
 
 ## Quick Start (VPS)
 
@@ -60,6 +74,47 @@ CMD ["node","index.js"]
 
 Sessions persist in `data/platform-registry.json` + `auth/`. No env editing.
 
+## Data Storage
+
+There is no database engine. Each bot owns exactly one JSON file:
+
+```
+data/bots/<botId>.json
+```
+
+Inside it, eight flat sections — only keys somebody actually wrote are stored, so a fresh bot's file is under 1 KB and defaults fill in at read time:
+
+```jsonc
+{
+  "schemaVersion": 1,
+  "settings":    { "botName": "…", "prefix": ".", "mode": "public" },
+  "groups":      { "<groupJid>": { "welcome": true, "antilink": false } },
+  "users":       { "<userJid>":  { "name": "…" } },
+  "warnings":    { "<groupJid>": { "<userJid>": { "count": 2, "entries": [] } } },
+  "moderators":  { "<groupJid>": ["<userJid>"] },
+  "muted":       { "<groupJid>": { "<userJid>": 1730000000000 } },
+  "groupStats":  { "<groupJid>": { "2026-09-25": { "total": 5, "users": {}, "hours": {} } } },
+  "lidMap":      { "lidToPn": {}, "pnToLid": {} },
+  "kv":          {}
+}
+```
+
+**How a call finds the right file.** `index.js` wraps every inbound message in `database.runAsBot(bot.id, …)`, which uses Node's `AsyncLocalStorage` to tag the whole async chain. Any `database.*` call made while handling that message — including ones fired after an `await` — resolves to that bot's file. Calls made outside any bot context (boot-time reads, timers) fall back to the default bot.
+
+This replaced a design where each bot got its own SQLite file but 181 modules had already captured the *default* handle at `require()` time, so every bot silently shared one database: bot A disabling a command disabled it for bot B, and the last bot to set `botName` won. `runAsBot` resolves the bot at call time instead of import time, which is what makes concurrent bots actually independent.
+
+**Writes.** Debounced 250 ms per bot, then written to a temp file and `rename()`d into place, so a crash mid-write cannot truncate a bot's data. `process.exit()` is covered by an `exit` handler that flushes synchronously. A file that fails to parse is renamed to `<botId>.json.corrupt-<timestamp>` and the bot starts fresh rather than taking the process down.
+
+**Ops.**
+```js
+database.listBotIds()          // every bot with a file on disk
+database.botDataFile(botId)    // resolved path
+database.flush()               // write all pending changes now
+database.resetBotData(botId)   // wipe one bot
+```
+
+`data/` is gitignored. To back up, copy the directory — no dump tool, no migration, no lock files. Edit a bot's settings by hand with any text editor while the server is stopped.
+
 ## APIs (Lite)
 
 **Public (no auth):**
@@ -94,17 +149,34 @@ No `/dev/*` — dev dashboard removed completely.
 9. Anti-delete + group stats + auto-react caches per bot
 10. `.env` watcher + hot-reload + `JUNE_SESSIONS` JSON parsing every 15s
 
-**Lite removes all above.** Only `baileys` + `express` + `qrcode` remain. Per-bot RAM ~15-25MB.
+Items **2 and 6 are now gone** — no database engine is installed at all, and the DB layer's module count dropped from 54 to 4. Items 3, 4, 7, 8, 9 and 10 went with the command purge.
 
-## Scaling to 100+ Bots
+**Still riding along**, each pulled in by exactly one `utils/` file that nothing currently requires — the largest remaining win, worth ~123 MB of `node_modules`:
 
-- Set `PLATFORM_MAX_BOTS=100` (or 200)
-- Use `auth/` on fast disk (SSD)
-- Disable heavy commands (already done)
+| package | size | only required by |
+|---|---|---|
+| `ffmpeg-static` | 77 MB | `utils/ffmpegPath.js` |
+| `webp-converter` | 33 MB | `utils/sticker.js` |
+| `fluent-ffmpeg` | 13 MB | `utils/sticker.js` |
+
+They are left declared so that restoring a sticker/video command from git history (`git checkout 16d1f45 -- commands/<path>`) keeps working. Delete them only if you are sure those commands are not coming back.
+
+## Scaling
+
+Budget from measured numbers, not estimates: **88 MB fixed** for the gateway with zero bots, then **~15–25 MB per bot** for the Baileys socket plus **~0.4 MB** for its data.
+
+| VPS | realistic bots | notes |
+|---|---|---|
+| 500 MB | **~20** | 412 MB left after the fixed cost |
+| 1 GB | ~40 | |
+| 4 GB | ~120–150 | leave headroom for message bursts |
+
+- Set `PLATFORM_MAX_BOTS` to your real ceiling — it is a hard gate, not a hint
+- Put `auth/` and `data/` on SSD; both are small-file workloads
 - Monitor `GET /health/details` → `memory.heapUsed`
-- If heap > 80% of VPS, lower cap or add another instance with shared `data/` via NFS or use PM2 cluster
+- If heap passes ~80% of the box, lower the cap rather than adding swap
 
-Example: 4GB VPS → 100 bots ≈ 2GB (50%) → fits in 25% of 8GB VPS (2GB). For true 25% of 4GB (1GB), host ~40-50 bots per instance.
+**One process per `data/` directory.** The store is a JSON file per bot with no cross-process locking, so PM2 cluster mode or two instances sharing `data/` will have them overwrite each other — last writer wins. Scale by running separate instances with separate `JUNE_DATA_DIR` values behind a load balancer, splitting bots across them. Within one instance, bots are fully isolated from each other.
 
 ## Env Vars (Lite)
 
@@ -118,6 +190,8 @@ Only:
 - `PLATFORM_MAX_WS_CONNECTIONS` (200)
 - `PLATFORM_MAX_WS_PER_IP` (20)
 - `LOG_LEVEL` (silent/info)
+- `JUNE_DATA_DIR` (default `<repo>/data/bots`) — where the per-bot JSON files live
+- `JUNE_DB_FLUSH_MS` (default 250) — write debounce per bot; raise it on slow disks
 
 Fully web-based edition — nothing like switching mode through env.
 
