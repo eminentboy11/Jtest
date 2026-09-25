@@ -35,10 +35,17 @@ const ROUTINE = [
   /^Unhandled bucket type/,     // queue_job.js
 ];
 
-// Deliberately NOT silenced, because each one means something went wrong:
-//   curve.js          "WARNING: Expected pubkey of length 33..."
+// Failures stay visible but FLOOD-CONTROLLED, because a desynced session can
+// repeat them dozens of times per minute with a full stack each — exactly
+// what buried the VPS console after status-reply Bad MAC storms:
+//   session_cipher.js "Session error:..." + stack           (Bad MAC etc.)
 //   session_cipher.js "Failed to decrypt message with any known session..."
-//   session_cipher.js "Session error:..." + stack
+// The first failure in a window prints as ONE line (stack dropped); repeats
+// inside the window are counted and the count rides on the next printed line.
+// Still fully visible, never a wall of stacks.
+//
+// Printed verbatim (each one means something different went wrong):
+//   curve.js          "WARNING: Expected pubkey of length 33..."
 //   session_cipher.js "Decrypted message with closed session."
 //   session_record.js "V1 session storage migration error: ..."
 
@@ -60,9 +67,44 @@ function install() {
     console[method] = function silenced(...args) {
       const first = args[0];
       if (typeof first === 'string' && ROUTINE.some((re) => re.test(first))) return;
+      const decision = decideFailure(first);
+      if (decision) {
+        if (!decision.print) return;
+        return original(decision.line);
+      }
       return original(...args);
     };
   }
 }
 
-module.exports = { install, ROUTINE };
+// ── Failure flood control ────────────────────────────────────────────────────
+const FAILURE = [
+  /^Session error:/,                                    // session_cipher.js (Bad MAC …)
+  /Failed to decrypt message with any known session/,   // session_cipher.js
+];
+const FAILURE_WINDOW_MS = 5 * 60 * 1000;
+let failureWindowStart = 0;
+let failureSuppressed = 0;
+
+/**
+ * Pure-ish decision maker (state lives in the two counters above).
+ * Returns null for lines that are not session failures (print verbatim),
+ * otherwise { print, line } — print once per window, one line, no stack.
+ */
+function decideFailure(first, now = Date.now()) {
+  if (typeof first !== 'string' || !FAILURE.some((re) => re.test(first))) return null;
+  if (now - failureWindowStart > FAILURE_WINDOW_MS) {
+    const line = String(first).split('\n')[0].slice(0, 160)
+      + (failureSuppressed ? `  (+${failureSuppressed} similar suppressed in the last 5 min)` : '')
+      + '  [stack hidden — JUNE_LIBSIGNAL_LOG=1 for raw libsignal output]';
+    failureSuppressed = 0;
+    failureWindowStart = now;
+    return { print: true, line };
+  }
+  failureSuppressed += 1;
+  return { print: false, line: null };
+}
+
+function _resetFailureWindow() { failureWindowStart = 0; failureSuppressed = 0; }
+
+module.exports = { install, ROUTINE, FAILURE, decideFailure, _resetFailureWindow };
