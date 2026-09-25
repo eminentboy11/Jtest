@@ -201,4 +201,32 @@ Only:
 
 Fully web-based edition — nothing like switching mode through env.
 
+## Tests
+
+```bash
+npm test
+```
+
+127 assertions across five suites, using Node's built-in runner — no test framework dependency. Runs serially (`--test-concurrency=1`) because the loader suite writes real temporary files into `commands/`.
+
+| suite | covers |
+|---|---|
+| `test/database.test.js` | per-bot isolation, sparse storage, concurrency across awaits, atomic writes, corrupt-file quarantine, persistence across a restart |
+| `test/hooks.test.js` | the five moderation hooks — fires when enabled, inert when not, and stays per bot |
+| `test/dispatch.test.js` | `.ping` / `.uptime` and aliases, removed commands falling through silently, bot-mode gating |
+| `test/loader.test.js` | command discovery, alias shadowing, fault tolerance, hot reload through the live dispatch table |
+| `test/structure.test.js` | whole-repo invariants: syntax, module graph, dependency hygiene, no committed secrets |
+
+`test/structure.test.js` is the one worth reading if you change the build. It exists because two npm scripts pointed at files that were not in the repo, and nothing caught it:
+
+- every script naming a file must point at one that exists
+- no file may be unreachable from `index.js` or `commands/` — walked to a fixpoint, because a file referenced only by other dead files is still dead
+- no relative `require()` may point at a missing file, except the three optional game modules resolved through `optionalModule()`
+- every `database.*` access in live code must resolve to a real export
+- no credential-shaped strings anywhere in the repo
+
+Two helpers, `test/_child-reload.js` and `test/_child-exit.js`, are spawned as separate processes to test restart persistence and the exit-flush path. They `process.exit(0)` when run with no arguments, because the Node runner treats *every* `.js` file inside a directory named `test/` as a test file and therefore executes them directly as well — without the `dataDir` their real caller passes. `test/structure.test.js` asserts that stays true.
+
+The suite needs no network and no WhatsApp account: the socket is a recording mock at the edge, and Baileys' `downloadContentFromMessage` is stubbed through a `require.cache` proxy (it is an ESM live binding, so it cannot be monkey-patched).
+
 ## License MIT

@@ -170,7 +170,7 @@ const DEFAULT_GROUP_SETTINGS = {
   stickerActions: {},
   antitagadmins: false, antitagadminsAction: 'warn',
   antiall: false,
-  antiforward: false, antiforwardLimit: 3,
+  antiforward: false, antiforwardAction: 'delete', antiforwardLimit: 3,
   antiSpam: false, antiSpamLimit: 5, antiSpamWindow: 5, antiSpamAction: 'delete',
   nsfw: false,
   detect: false,
@@ -429,6 +429,112 @@ const setAntiAllEnabled = (groupId, enabled) => {
   return value;
 };
 
+// ── Moderation hook settings ──────────────────────────────────────────────
+// Thin accessors over the group settings. commands/admin/*.js read and write
+// through these rather than touching the settings keys directly, so the hook in
+// handler.js and the command that configures it stay in agreement.
+//
+// Every writer here stores a patch, never the merged object. getGroupSettings()
+// layers the default template underneath what is stored, so writing the merged
+// result back would persist all forty defaults into this group's record and
+// freeze it against future template changes.
+
+const ANTITAGADMINS_ACTIONS = Object.freeze(['kick', 'warn', 'delete']);
+const ANTIFORWARD_ACTIONS = Object.freeze(['delete', 'warn', 'kick']);
+
+function normaliseChoice(value, choices, fallback) {
+  const normalized = String(value || '').trim().toLowerCase();
+  return choices.includes(normalized) ? normalized : fallback;
+}
+
+const getAntiTagAdminsSettings = (groupId) => {
+  const settings = getGroupSettings(groupId);
+  return {
+    enabled: settings.antitagadmins === true,
+    action: normaliseChoice(settings.antitagadminsAction, ANTITAGADMINS_ACTIONS, 'warn'),
+  };
+};
+
+const setAntiTagAdminsSettings = (groupId, updates = {}) => {
+  const current = getAntiTagAdminsSettings(groupId);
+  const has = (k) => Object.prototype.hasOwnProperty.call(updates, k);
+  const next = {
+    enabled: has('enabled') ? updates.enabled === true : current.enabled,
+    action: has('action')
+      ? normaliseChoice(updates.action, ANTITAGADMINS_ACTIONS, 'warn')
+      : current.action,
+  };
+  updateGroupSettings(groupId, {
+    antitagadmins: next.enabled,
+    antitagadminsAction: next.action,
+  });
+  return next;
+};
+
+/**
+ * Antiforward configuration.
+ *
+ * The returned object carries both naming conventions on purpose.
+ * commands/admin/antiforward.js reads `antiforward` / `antiforwardAction` /
+ * `antiforwardMaxWarnings`, while the original database.js returned
+ * `enabled` / `warnLimit` — a mismatch that left the feature dead, because the
+ * command's guard `if (!settings.antiforward) return false` was always true.
+ * Both sets are present so neither caller style silently reads undefined.
+ */
+const getAntiforwardSettings = (groupId) => {
+  const settings = getGroupSettings(groupId);
+  const enabled = settings.antiforward === true;
+  const action = normaliseChoice(settings.antiforwardAction, ANTIFORWARD_ACTIONS, 'delete');
+  const maxWarnings = Math.max(1, Math.floor(Number(settings.antiforwardLimit)) || 3);
+  return {
+    antiforward: enabled,
+    antiforwardAction: action,
+    antiforwardMaxWarnings: maxWarnings,
+    enabled,
+    warnLimit: maxWarnings,
+  };
+};
+
+/**
+ * @param {string} groupId
+ * @param {boolean} enabled
+ * @param {string|number} [action]    'delete' | 'warn' | 'kick'
+ * @param {number}  [maxWarnings]      strikes before a 'warn' action kicks
+ *
+ * Also accepts the older three-argument shape (groupId, enabled, warnLimit):
+ * a number in the action slot is read as the warning limit, not an action.
+ */
+const updateAntiforwardSettings = (groupId, enabled, action, maxWarnings) => {
+  const current = getAntiforwardSettings(groupId);
+
+  if (maxWarnings === undefined && typeof action === 'number') {
+    maxWarnings = action;
+    action = current.antiforwardAction;
+  }
+
+  const limit = Number(maxWarnings === undefined ? current.antiforwardMaxWarnings : maxWarnings);
+  updateGroupSettings(groupId, {
+    antiforward: !!enabled,
+    antiforwardAction: normaliseChoice(action, ANTIFORWARD_ACTIONS, current.antiforwardAction),
+    antiforwardLimit: Math.max(1, Math.floor(limit) || 3),
+  });
+  return getAntiforwardSettings(groupId);
+};
+
+// Strikes live in the shared per-bot warnings record, tagged with the reason,
+// so antiforward counts are isolated per bot and per group like everything else.
+const addAntiforwardWarning = (groupId, userId) => addWarning(groupId, userId, 'antiforward');
+const getAntiforwardWarningCount = (groupId, userId) => getWarnings(groupId, userId).count;
+const clearAntiforwardWarning = (groupId, userId) => removeWarning(groupId, userId);
+
+/**
+ * Reset antiforward strikes. antiforward.js calls this as (groupId, userId)
+ * after removing a member; the original ignored the second argument and wiped
+ * every warning in the group as a side effect. clearWarnings() already scopes
+ * to one user when given one, so passing it through fixes that.
+ */
+const clearAllAntiforwardWarnings = (groupId, userId) => clearWarnings(groupId, userId);
+
 // ── Users ─────────────────────────────────────────────────────────────────
 
 const getUser = (userId) => clone(store().users[String(userId)] || {});
@@ -647,6 +753,10 @@ module.exports = {
   getGroupSettings, updateGroupSettings, getStoredGroupSettings,
   getDefaultGroupSettings, DEFAULT_GROUP_SETTINGS,
   isAntiAllEnabled, setAntiAllEnabled,
+  getAntiTagAdminsSettings, setAntiTagAdminsSettings, ANTITAGADMINS_ACTIONS,
+  getAntiforwardSettings, updateAntiforwardSettings, ANTIFORWARD_ACTIONS,
+  addAntiforwardWarning, getAntiforwardWarningCount,
+  clearAntiforwardWarning, clearAllAntiforwardWarnings,
 
   // users / warnings / moderators / mutes
   getUser, updateUser,
