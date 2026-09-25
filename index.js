@@ -17,7 +17,7 @@ const pino = require('pino');
 
 // WDP core
 const database = require('./database');
-
+const { applyFont } = require('./utils/fontConverter')
 // Platform (from lite) — web gateway
 const platformBridge = require('./platform/bridge');
 const { attachPlatform } = require('./platform');
