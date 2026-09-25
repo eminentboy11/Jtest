@@ -6,9 +6,8 @@
   "type": "commonjs",
   "scripts": {
     "start": "node index.js",
-    "build": "node obfuscator.js",
     "dev": "nodemon index.js",
-    "test": "node --test test/",
+    "test": "node --test --test-concurrency=1 test/",
     "install:no-puppeteer": "PUPPETEER_SKIP_DOWNLOAD=true PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true npm install"
   },
   "keywords": [

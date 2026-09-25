@@ -128,14 +128,62 @@ async function revealVoToDM(sock, originalMsg, targetJid) {
 // index.js reads counts back via getCommandCount() instead of loading a second
 // copy, which would double the dispatch table and start a second watcher.
 const commands = loadCommands();
-watchCommands((freshCommands) => {
+// Keep the handle: watchCommands() returns { close }, and dropping it meant the
+// fs.watch could never be released -- not by graceful shutdown, not by the test
+// suite. An open watcher keeps the event loop alive, so the process could only
+// ever end via an explicit process.exit().
+const commandWatcher = watchCommands((freshCommands) => {
   // Same Map instance, because the handler references it throughout; swapInto
   // replaces the entries and recomputes the non-enumerable counts.
   swapInto(commands, freshCommands);
+  // Re-resolve the optional game modules too, so dropping commands/fun/bomb.js
+  // back in works without a restart.
+  gameModules = loadGameModules();
   if (typeof global.invalidateSettingsCache === 'function') {
     global.invalidateSettingsCache();
   }
 });
+
+/**
+ * Release the hot-reload watcher. index.js calls this during graceful shutdown;
+ * the test suite calls it so a run can exit on its own.
+ */
+function closeCommandWatcher() {
+  try { commandWatcher?.close?.(); } catch (_) {}
+}
+
+/**
+ * Require a module that may legitimately not exist.
+ *
+ * The game commands below are optional, and the old code called require() on
+ * them inside the message handler. A failed require is not cached by Node, so
+ * every single inbound message paid three filesystem lookups and three swallowed
+ * MODULE_NOT_FOUND exceptions. Resolving once costs nothing per message.
+ */
+function optionalModule(spec) {
+  try { return require(spec); } catch (_) { return null; }
+}
+
+// Mid-game input has to be intercepted before the prefix check, because a move
+// like "3" is not a command. Restore any of these files and it lights up again
+// on the next hot reload, with no edit to this handler.
+function loadGameModules() {
+  return {
+    bomb: optionalModule('./commands/fun/bomb'),
+    tictactoe: optionalModule('./commands/fun/tictactoe'),
+    ttt2: optionalModule('./commands/fun/ttt2'),
+  };
+}
+let gameModules = loadGameModules();
+
+/** True when `sender` is a player in a live room owned by this game module. */
+function hasActiveGameRoom(mod, handlerName, roomPrefix, sender) {
+  if (typeof mod?.[handlerName] !== 'function') return false;
+  return Object.values(mod.games || {}).some((room) =>
+    String(room?.id || '').startsWith(roomPrefix) &&
+    [room.game?.playerX, room.game?.playerO].includes(sender) &&
+    room.state === 'PLAYING');
+}
 
 
 // Unwrap WhatsApp containers (ephemeral, view once, etc.)
@@ -295,7 +343,9 @@ const isMod = isSudo;
 // LID mapping cache
 const lidMappingCache = new Map();
 
-// Periodically evict old groupMetadataCache entries (every 10 minutes)
+// Periodically evict old groupMetadataCache entries (every 10 minutes).
+// unref() so housekeeping alone cannot hold the event loop open -- without it
+// the process would never exit on its own between messages.
 setInterval(() => {
   const now = Date.now();
   for (const [key, val] of groupMetadataCache) {
@@ -303,7 +353,7 @@ setInterval(() => {
   }
   // Clear lid mapping cache completely every 10 minutes to prevent unbounded growth
   lidMappingCache.clear();
-}, 10 * 60 * 1000);
+}, 10 * 60 * 1000).unref();
 
 // Helper to normalize JID to just the number part
 const normalizeJid = (jid) => {
@@ -987,96 +1037,31 @@ const handleMessage = async (sock, msg) => {
       }
     }
 
-     // Check for active bomb games (before prefix check)
+    // ── Mid-game input for the optional game commands ────────────────────────
+    // Resolved once at load (and again on hot reload) rather than per message.
+    // A failure in an optional game module must not take down message handling,
+    // so the whole group stays wrapped.
     try {
-      const bombModule = require('./commands/fun/bomb');
-      if (bombModule.gameState && bombModule.gameState.has(sender)) {
+      if (gameModules.bomb?.gameState?.has(sender)) {
         const bombCommand = commands.get('bomb');
-        if (bombCommand && bombCommand.execute) {
-          // User has active game, process input
-          await bombCommand.execute(sock, msg, [], {
-            from,
-            sender,
-            isGroup,
-            groupMetadata,
-            isOwner: isOwner(sender),
-            isAdmin: await isAdmin(sock, sender, from, groupMetadata),
-            isBotAdmin: await isBotAdmin(sock, from, groupMetadata),
-            isMod: isMod(sender),
-            reply: (text) => sock.sendMessage(from, { text }, { quoted: msg }),
-            react: (emoji) => sock.sendMessage(from, { react: { text: emoji, key: msg.key } })
-          });
-          return; // Don't process as command
+        if (bombCommand?.execute) {
+          await bombCommand.execute(sock, msg, [], await makeExtra());
+          return;   // consumed as a game move, not a command
         }
       }
-    } catch (e) {
-      // Silently ignore if bomb command doesn't exist or has errors
-    }
 
-    // Check for active tictactoe games (before prefix check)
-    try {
-      const tictactoeModule = require('./commands/fun/tictactoe');
-      if (tictactoeModule.handleTicTacToeMove) {
-        // Check if user is in an active game
-        const isInGame = Object.values(tictactoeModule.games || {}).some(room =>
-          room.id.startsWith('tictactoe') &&
-          [room.game.playerX, room.game.playerO].includes(sender) &&
-          room.state === 'PLAYING'
-        );
+      if (hasActiveGameRoom(gameModules.tictactoe, 'handleTicTacToeMove', 'tictactoe', sender)) {
+        const handled = await gameModules.tictactoe.handleTicTacToeMove(sock, msg, await makeExtra());
+        if (handled) return;
+      }
 
-        if (isInGame) {
-          // User has active game, process input
-          const handled = await tictactoeModule.handleTicTacToeMove(sock, msg, {
-            from,
-            sender,
-            isGroup,
-            groupMetadata,
-            isOwner: isOwner(sender),
-            isAdmin: await isAdmin(sock, sender, from, groupMetadata),
-            isBotAdmin: await isBotAdmin(sock, from, groupMetadata),
-            isMod: isMod(sender),
-            reply: (text) => sock.sendMessage(from, { text }, { quoted: msg }),
-            react: (emoji) => sock.sendMessage(from, { react: { text: emoji, key: msg.key } })
-          });
-          if (handled) return; // Don't process as command if move was handled
-        }
+      if (hasActiveGameRoom(gameModules.ttt2, 'handleTtt2Move', 'ttt2', sender)) {
+        const handled = await gameModules.ttt2.handleTtt2Move(sock, msg, await makeExtra());
+        if (handled) return;
       }
     } catch (e) {
-      // Silently ignore if tictactoe command doesn't exist or has errors
+      // An optional game module erroring is not worth failing the message over.
     }
-
-    // Check for active ttt2 games (before prefix check)
-    try {
-      const ttt2Module = require('./commands/fun/ttt2');
-      if (ttt2Module.handleTtt2Move) {
-        // Check if user is in an active game
-        const isInTtt2 = Object.values(ttt2Module.games || {}).some(room =>
-          room.id.startsWith('ttt2') &&
-          [room.game.playerX, room.game.playerO].includes(sender) &&
-          room.state === 'PLAYING'
-        );
-
-        if (isInTtt2) {
-          // User has active game, process input
-          const handledTtt2 = await ttt2Module.handleTtt2Move(sock, msg, {
-            from,
-            sender,
-            isGroup,
-            groupMetadata,
-            isOwner: isOwner(sender),
-            isAdmin: await isAdmin(sock, sender, from, groupMetadata),
-            isBotAdmin: await isBotAdmin(sock, sender, from, groupMetadata),
-            isMod: isMod(sender),
-            reply: (text) => sock.sendMessage(from, { text }, { quoted: msg }),
-            react: (emoji) => sock.sendMessage(from, { react: { text: emoji, key: msg.key } })
-          });
-          if (handledTtt2) return; // Don't process as command if move was handled
-        }
-      }
-    } catch (e) {
-      // Silently ignore if ttt2 command doesn't exist or has errors
-    }
-
 
     // Fancy text style selection: reply to fancy list with just a number
     if (/^\d+$/.test(body.trim())) {
@@ -1446,6 +1431,7 @@ const handleMessage = async (sock, msg) => {
 
 module.exports = {
   handleMessage,
+  closeCommandWatcher,
   isOwner,
   isAdmin,
   isBotAdmin,

@@ -400,6 +400,9 @@ async function shutdown() {
         // the store), then write every bot's JSON file out synchronously.
         try { global.__JUNE_FLUSH_GROUP_STATS?.(); } catch (_) {}
         try { database.shutdownDatabase(); } catch (_) {}
+        // Release the command hot-reload watcher, otherwise the open fs.watch
+        // keeps the event loop alive and server.close() never completes.
+        try { getWdpHandler().handler?.closeCommandWatcher?.(); } catch (_) {}
     } catch (_) {}
     server.close(() => process.exit(0));
     setTimeout(() => process.exit(0), 5000).unref();
