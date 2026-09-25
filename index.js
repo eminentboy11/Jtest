@@ -206,7 +206,7 @@ async function bootBot(botId, opts = {}) {
                     const selfJid = sock.user?.id ? sock.user.id.split(':')[0] + '@s.whatsapp.net' : null;
                     const welcomeText = applyFont(
 `┏━━━✧ JUNE X WEB ✧━━━━
-┃✧ Bot: ${juneDatabase.getBotSetting('botName')}
+┃✧ Bot: ${database.getBotSetting('botName')}
 ┃✧ Prefix: [ ${prefix} ]
 ┃✧ Owner: ${ownerName}
 ┃✧ Platform: ${platform}
