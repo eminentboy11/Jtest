@@ -70,7 +70,9 @@ async function purgeBot(botId, { reason = 'purge', bots, authRoot } = {}) {
         if (rec) { await registry.markRemoved(id); cleared.push('registry'); }
     } catch (_) {}
 
-    console.log(`[ ${id} ] 🧹 Purged (${reason}) — ${cleared.join(', ') || 'nothing to clear'}`);
+    if (['true','1','yes','on'].includes(String(process.env.DEBUG || '').trim().toLowerCase())) {
+        console.log(`[ ${id} ] 🧹 Purged (${reason}) — ${cleared.join(', ') || 'nothing to clear'}`);
+    }
     return { ok: true, id, reason, cleared };
 }
 

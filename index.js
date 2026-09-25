@@ -37,6 +37,13 @@ global.__ROOT__ = __dirname;
 
 const DATA_DIR = path.join(process.cwd(), 'data');
 const AUTH_ROOT = path.join(process.cwd(), 'auth');
+
+// DEBUG=true in env unlocks the per-bot lifecycle chatter (event dumps,
+// close reasons, pairing attempts, purge traces). Without it the console
+// keeps only the lines you act on: connected, pairing code delivered,
+// reconnects, failures, boot summary.
+const DEBUG_LOG = ['true', '1', 'yes', 'on'].includes(String(process.env.DEBUG || '').trim().toLowerCase());
+const debugLog = (...args) => { if (DEBUG_LOG) console.log(...args); };
 fs.mkdirSync(DATA_DIR, { recursive: true });
 fs.mkdirSync(AUTH_ROOT, { recursive: true });
 
@@ -139,7 +146,7 @@ async function bootBot(botId, opts = {}) {
     const authDir = path.join(AUTH_ROOT, String(bot.id));
     fs.mkdirSync(authDir, { recursive: true });
     // Per-bot data file: data/bots/<botId>.json (created on first write)
-    console.log(`[ DB ] ${bot.id} → ${database.botDataFile(bot.id)}`);
+    debugLog(`[ DB ] ${bot.id} → ${database.botDataFile(bot.id)}`);
     const { state, saveCreds } = await useMultiFileAuthState(authDir);
     const { version } = await fetchLatestBaileysVersion().catch(() => ({ version: [2, 3000, 1015901307] }));
 
@@ -175,11 +182,11 @@ async function bootBot(botId, opts = {}) {
                 console.log(`[ ${bot.id} ] Stored phone "${cleanPhone || '(empty)'}" is not a valid number — skipping pairing code`);
                 return;
             }
-            console.log(`[ ${bot.id} ] Waiting 3s for socket to stabilize...`);
+            debugLog(`[ ${bot.id} ] Waiting 3s for socket to stabilize...`);
             await delay(3000);
             if (stale()) return;
             if (bot.state === 'connected') return;
-            console.log(`[ ${bot.id} ] Requesting pairing code for ${cleanPhone} (attempt ${bot.pairing.attempts+1}/3)`);
+            debugLog(`[ ${bot.id} ] Requesting pairing code for ${cleanPhone} (attempt ${bot.pairing.attempts+1}/3)`);
             const rawCode = await sock.requestPairingCode(cleanPhone);
             const formatted = rawCode?.length === 8 ? `${rawCode.slice(0,4)}-${rawCode.slice(4)}` : rawCode;
             bot.pairing.lastCode = rawCode;
@@ -189,7 +196,7 @@ async function bootBot(botId, opts = {}) {
             platformBridge.emitPairingCode(bot, rawCode, { attempt: bot.pairing.attempts, gen: bot.pairing.gen, formatted });
             try { slots.setCode(bot.id, rawCode, bot.pairing.attempts, 3); } catch (_) {}
         } catch (e) {
-            console.log(`[ ${bot.id} ] Pairing code failed: ${e.message}`);
+            debugLog(`[ ${bot.id} ] Pairing code failed: ${e.message}`);
             bot.lastError = e.message;
             bot.pairing._requested = false;
         }
@@ -198,7 +205,7 @@ async function bootBot(botId, opts = {}) {
         try {
             const { connection, lastDisconnect, qr } = update;
             const statusCode = lastDisconnect?.error?.output?.statusCode;
-            console.log(`[ ${bot.id} ] event: ${Object.keys(update).join(',')} conn=${connection} status=${statusCode}`);
+            debugLog(`[ ${bot.id} ] event: ${Object.keys(update).join(',')} conn=${connection} status=${statusCode}`);
             platformBridge.emitConnUpdate(bot, update, sock);
 
             if (qr) {
@@ -238,7 +245,7 @@ async function bootBot(botId, opts = {}) {
             if (connection === 'close') {
                 if (stale()) return;   // purged or rebooted elsewhere; this socket is history
                 const reason = lastDisconnect?.error?.message || 'unknown';
-                console.log(`[ ${bot.id} ] Close: status=${statusCode} reason=${reason} pairingDone=${bot.pairingDone}`);
+                debugLog(`[ ${bot.id} ] Close: status=${statusCode} reason=${reason} pairingDone=${bot.pairingDone}`);
 
                 if (statusCode === 401) {
                     // WDP's rule (their index.js ~1300): a 401 whose message says
@@ -261,7 +268,7 @@ async function bootBot(botId, opts = {}) {
                         bootBot(bot.id, { force: true }).catch(e => console.log(`[ ${bot.id} ] Conflict reconnect failed: ${e.message}`));
                         return;
                     }
-                    console.log(`[ ${bot.id} ] 401 logged out — purging everything for this botId`);
+                    debugLog(`[ ${bot.id} ] 401 logged out — purging everything for this botId`);
                     await purgeBot(bot.id, { reason: 'whatsapp-logout-401', bots, authRoot: AUTH_ROOT });
                     return;
                 }
@@ -292,7 +299,7 @@ async function bootBot(botId, opts = {}) {
         setTimeout(() => {
             if (stale()) return;
             if (bot.state !== 'connected' && !bot.pairing._requested && !bot.pairing.lastCode) {
-                console.log(`[ ${bot.id} ] QR not received, fallback requesting pairing code...`);
+                debugLog(`[ ${bot.id} ] QR not received, fallback requesting pairing code...`);
                 attemptPairingCode();
             }
         }, 6000);
