@@ -130,11 +130,11 @@ describe('dependencies', () => {
     assert.deepEqual(missing, []);
   });
 
-  test('the four deliberately-retained deps are documented in the README', () => {
-    const readme = read(path.join(REPO, 'README.md'));
-    for (const d of ['axios', 'jimp', 'node-webpmux', 'form-data']) {
-      assert.ok(readme.includes(d), `${d} is declared but unused by live code; the README must say why`);
-    }
+  test('every declared dependency is required by live code', () => {
+    const src = repoFiles().map(read).join('\n');
+    const unused = Object.keys(pkg.dependencies).filter((d) =>
+      !new RegExp(`require\\(['"]${d.replace('/', '\\/')}['"]\\)`).test(src));
+    assert.deepEqual(unused, [], 'declared but never required: drop it or use it');
   });
 });
 
@@ -197,8 +197,8 @@ describe('module graph', () => {
     }
     // Exactly two, and both are deliberate:
     //   utils/commandLoader.js - requires the command files it discovers on disk
-    //   handler.js             - optionalModule() for commands/fun/{bomb,
-    //                            tictactoe,ttt2}, which may not exist
+    //   handler.js             - optionalModule() for commands/fun/ttt2,
+    //                            which may not exist
     // Anything else doing this would defeat the static graph above.
     assert.deepEqual(dynamic.sort(), [
       'handler.js',
@@ -209,11 +209,9 @@ describe('module graph', () => {
   test('the optional game modules are the only requires allowed to be missing', () => {
     const src = stripComments(read(path.join(REPO, 'handler.js')));
     const optional = [...src.matchAll(/optionalModule\(\s*'([^']+)'/g)].map((m) => m[1]);
-    assert.deepEqual(optional.sort(), [
-      './commands/fun/bomb',
-      './commands/fun/tictactoe',
-      './commands/fun/ttt2',
-    ]);
+    // Only the rich-app games are optional modules; bomb and tictactoe were
+    // plain-text games and are not part of this edition.
+    assert.deepEqual(optional, ['./commands/fun/ttt2']);
     // They are resolved through optionalModule() rather than a bare require()
     // inside the message handler, so an absent file costs nothing per message.
     assert.equal(/require\(\s*'\.\/commands\/fun\//.test(src), false,

@@ -680,6 +680,37 @@ const delKV = (namespace, key) => {
 };
 const getAllKV = (namespace) => clone(store().kv[String(namespace)] || {});
 
+// ── antidelete ───────────────────────────────────────────────────────────────
+// The restored antidelete command stores a copy of recent messages so a delete
+// can be replayed. It lives in the generic kv namespace: per-bot, sparse, and
+// no schema change. Entries are capped so a chatty group cannot grow the file
+// without bound.
+const ANTIDELETE_MODES = ['off', 'chat', 'private'];
+const ANTIDELETE_MAX_ENTRIES = 1000;
+const adKey = (chatId, messageId) => `msg:${chatId}|${messageId}`;
+
+const getAntideleteMode = () => {
+  const m = getKV('antidelete', 'mode');
+  return ANTIDELETE_MODES.includes(m) ? m : 'off';
+};
+const setAntideleteMode = (mode) => {
+  const m = ANTIDELETE_MODES.includes(mode) ? mode : 'off';
+  setKV('antidelete', 'mode', m);
+  return m;
+};
+const saveAntideleteMessage = (chatId, messageId, payload, storedAt) => {
+  setKV('antidelete', adKey(chatId, messageId), { payload, storedAt: storedAt || Date.now() });
+  const all = getAllKV('antidelete');
+  const msgs = Object.entries(all).filter(([k]) => k.startsWith('msg:'));
+  if (msgs.length > ANTIDELETE_MAX_ENTRIES) {
+    msgs.sort((a, b) => (a[1]?.storedAt || 0) - (b[1]?.storedAt || 0));
+    for (const [k] of msgs.slice(0, msgs.length - ANTIDELETE_MAX_ENTRIES)) delKV('antidelete', k);
+  }
+  return true;
+};
+const getAntideleteMessage = (chatId, messageId) => getKV('antidelete', adKey(chatId, messageId));
+const deleteAntideleteMessage = (chatId, messageId) => delKV('antidelete', adKey(chatId, messageId));
+
 // ── Lifecycle ─────────────────────────────────────────────────────────────
 
 let _ready = null;
@@ -772,6 +803,10 @@ module.exports = {
 
   // generic kv
   getKV, setKV, delKV, getAllKV,
+
+  // antidelete
+  getAntideleteMode, setAntideleteMode, ANTIDELETE_MODES,
+  saveAntideleteMessage, getAntideleteMessage, deleteAntideleteMessage,
 
   // constants
   MESSAGES, SOCIAL, API_KEYS, ANTICALL_PRESETS, VERSION, SESSION_NAME,

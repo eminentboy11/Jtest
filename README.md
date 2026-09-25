@@ -7,16 +7,24 @@
 Previous edition was **9MB + 700 deps (48 packages, ffmpeg, sharp, jimp, ytdl, scrapers, pdfkit, etc)** + 309 commands loaded in memory + SQLite per bot + message store + group caches = **80-150MB RAM per bot** → 30 bots = 4.5GB.
 
 **Lite is:**
-- **12 declared deps**, of which 7 are load-bearing for the gateway: `baileys, express, qrcode, dotenv, pino, ws, awesome-phonenumber`
+- **10 declared deps**, every one required by live code (asserted by `test/structure.test.js`): `baileys, express, qrcode, dotenv, pino, ws, awesome-phonenumber, axios, node-webpmux, chalk`
 - **No database engine at all** — no `better-sqlite3`, no `sql.js`, no `mongodb`, no `pg`. Storage is one plain JSON file per bot (see [Data Storage](#data-storage))
-- **No `sharp`, no scrapers, no `moment`, no ffmpeg, no webp tooling** — media/scraper commands were removed with the command purge
+- **No `ffmpeg-static`, no `sharp`, no `jimp` dep** — `.sticker` converts through the *system* ffmpeg (`apt install ffmpeg`), which costs zero bytes of `node_modules` and zero idle RSS
 - **File auth** `auth/<botId>/creds.json`
-- **No message store**, no group metadata cache, no anti-delete queues
+- **No message store** and no group metadata cache; `.antidelete` keeps a capped 1,000-entry replay cache in the per-bot JSON instead
 - **No dev dashboard** (`/dev` removed), no `logStore`, no MongoDB registry
 - **No JUNE_SESSIONS env** — sessions only via web UI at `/`, persisted in `data/platform-registry.json`
 - **No JUNE_PLATFORM toggle** — always web
-- **2 commands shipped** (`.ping`, `.uptime`) behind a real hot-reloading loader — drop a file in `commands/` and it registers without a restart
-- **Zero unreachable code** — every one of the 27 remaining `.js` files is reachable from `index.js` or `commands/`
+- **18 commands shipped** behind a real hot-reloading loader — drop a file in `commands/` and it registers without a restart:
+  - health: `.ping`, `.uptime`
+  - moderation: `.antispam`, `.antiviewonce`, `.antibot`, `.antiforward`, `.antitagadmins`, `.antidelete`
+  - utility: `.menu`, `.help`, `.sticker`, `.vv`, `.save`, `.mygroups`, `.chatbot`
+  - rich-app games: `.ttt2`, `.tod`, `.snake`
+
+  This edition is deliberately a light gateway plus a core command set. The full
+  300-command June X experience is a different deployment: if a user wants more
+  commands than this, they deploy the main June X bot instead.
+- **Zero unreachable code** — every `.js` file in the repo is reachable from `index.js` or `commands/`, asserted on every test run
 
 **Measured** (Node 20, `--expose-gc`). The database columns compare against a worktree of the previous commit, same script, same session:
 
@@ -154,16 +162,10 @@ No `/dev/*` — dev dashboard removed completely.
 
 Items **2 and 6 are now gone** — no database engine is installed at all, and the DB layer's module count dropped from 54 to 4. Items 3, 4, 7, 8, 9 and 10 went with the command purge. Item 1's ffmpeg/webp half is gone too: `ffmpeg-static` (77 MB), `webp-converter` (33 MB), `fluent-ffmpeg` (13 MB) and `file-type` were dropped along with the 21 unreachable `utils/` files that were their only consumers — **124 MB of `node_modules`**.
 
-**Four deps are declared but not currently required by any live file.** They are kept on purpose, because restoring commands from git history needs them and each is cheap:
-
-| package | size | removed commands that require it |
-|---|---|---|
-| `axios` | 2.2 MB | **69** of 312 |
-| `jimp` | 3.3 MB | 2 — also an optional Baileys peer dep for image handling |
-| `node-webpmux` | 552 KB | 9 |
-| `form-data` | 345 KB | 6 |
-
-~3.4 MB total to keep 87 command restores working. Drop them only if you are certain those commands are not coming back; re-add the media tooling with `npm i ffmpeg-static fluent-ffmpeg webp-converter` if you restore a sticker or video command.
+**Every declared dependency is required by live code.** `jimp` and `form-data` are present in
+`node_modules` only as transitive deps (Baileys and axios respectively) and are not declared.
+Restoring further commands from git history may need `npm i jimp` or media tooling again;
+the structure suite will tell you the moment a declared dep has no live consumer.
 
 `utils/bot_image.jpg` and `utils/menu*.jpg` (280 KB) are likewise unused now but were the menu command's assets — kept for the same reason.
 
@@ -196,9 +198,13 @@ Only:
 - `PLATFORM_MAX_WS_CONNECTIONS` (200)
 - `PLATFORM_MAX_WS_PER_IP` (20)
 - `JUNE_DB_FLUSH_MS` (default 250) — write debounce per bot; raise it on slow disks
+- `CHATBOT_API_KEY` (unset by default) — enables `.chatbot` auto-replies; any OpenAI-compatible endpoint
+- `CHATBOT_BASE_URL` (default `https://api.openai.com/v1`) and `CHATBOT_MODEL` (default `gpt-4o-mini`)
 - `JUNE_LIBSIGNAL_LOG` (default off, `1` to enable) — Baileys bundles libsignal, which logs session churn straight to `console.*`, bypassing any logger level. By default the routine lifecycle lines and their multi-line `SessionEntry` dumps are suppressed; decrypt failures and key warnings still print. Set this to `1` to see everything while debugging.
 
 Note: an earlier revision of this README listed `LOG_LEVEL`. Nothing in the code reads it; it has been removed rather than left as a lie.
+
+`.sticker` needs a system ffmpeg (`apt install ffmpeg`). It is deliberately not an npm dep: `ffmpeg-static` is ~70 MB on disk and ~50 MB of RSS, which would roughly halve how many bots fit in a 500 MB VPS. Without it the command replies with the install hint instead of failing.
 
 Fully web-based edition — nothing like switching mode through env.
 
