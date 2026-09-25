@@ -221,6 +221,20 @@ function filePath(botId) {
   return path.join(DATA_DIR, `${safe}.json`);
 }
 
+/**
+ * Forget everything the database holds for one bot and delete its file.
+ * Cancels any pending debounced write first, so a purge cannot be
+ * resurrected 250ms later by a timer that was already in flight.
+ */
+function purgeBot(botId) {
+  const id = String(botId);
+  const t = timers.get(id);
+  if (t) { clearTimeout(t); timers.delete(id); }
+  stores.delete(id);
+  dirty.delete(id);
+  try { fs.rmSync(filePath(id), { force: true }); } catch (_) {}
+}
+
 function load(botId) {
   const existing = stores.get(botId);
   if (existing) return existing;
@@ -780,7 +794,7 @@ module.exports = {
 
   // bot context
   runAsBot, currentBotId, DEFAULT_BOT_ID, listBotIds, getDataDir,
-  botDataFile: filePath,
+  botDataFile: filePath, purgeBot,
 
   // settings
   getBotSetting, setBotSetting, updateBotSettings, getAllBotSettings,
