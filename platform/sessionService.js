@@ -70,7 +70,10 @@ async function provision(input = {}, options = {}) {
 async function restorePersisted(records = []) {
     const entries = [];
     for (const record of Array.isArray(records) ? records : []) {
-        if (!record?.webManaged || record.removedAt || !record.botId) continue;
+        // Allow restoreOnly from auth scan (no webManaged) as well as webManaged from registry
+        if (record.removedAt) continue;
+        if (!record.botId && !record.id) continue;
+        if (!record.webManaged && !record.restoreOnly) continue;
         const id = String(record.botId);
         if (record.mode === 'qr') {
             entries.push({ id, name: `June X ${id.slice(-3)}`, qrLogin: true, restoreOnly: true });
