@@ -4,6 +4,8 @@
  */
 'use strict';
 
+const DEBUG_LOG = ['true','1','yes','on'].includes(String(process.env.DEBUG || '').trim().toLowerCase());
+
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
@@ -55,7 +57,7 @@ function fileSave() {
 
 async function init() {
     fileLoad();
-    console.log(`[ PLATFORM ] Registry: file (${FILE_PATH})`);
+    if (DEBUG_LOG) console.log(`[ PLATFORM ] Registry: file (${FILE_PATH})`);
     return 'file';
 }
 

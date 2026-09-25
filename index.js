@@ -78,7 +78,7 @@ function getWdpHandler() {
     if (!globalHandler) {
         try {
             globalHandler = require('./handler');
-            console.log(`[ WDP ] Handler loaded — ${commandCount()} commands + ${aliasCount()} aliases (shared across ${MAX_BOTS} bots)`);
+            debugLog(`[ WDP ] Handler loaded — ${commandCount()} commands + ${aliasCount()} aliases (shared across ${MAX_BOTS} bots)`);
         } catch (e) {
             console.log('[ WDP ] Handler load failed:', e.message, e.stack?.slice(0,300));
         }
@@ -415,7 +415,7 @@ attachPlatform(app, server).then(async () => {
         if (entries.length) {
             console.log(`[ BOOT ] Restoring ${entries.length} persisted session(s) from ${source}...`);
             const res = await sessionService.restorePersisted(entries);
-            console.log(`[ BOOT ] Restore result: ${JSON.stringify(res)} — bots now ${bots.size}`);
+            debugLog(`[ BOOT ] Restore result: ${JSON.stringify(res)} — bots now ${bots.size}`);
         } else {
             console.log('[ BOOT ] No persisted sessions — waiting for web pairing at /');
         }

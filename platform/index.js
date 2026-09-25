@@ -4,6 +4,8 @@
  */
 'use strict';
 
+const DEBUG_LOG = ['true','1','yes','on'].includes(String(process.env.DEBUG || '').trim().toLowerCase());
+
 const express = require('express');
 const { WebSocketServer, WebSocket } = require('ws');
 
@@ -23,7 +25,7 @@ const wsCountsByIp = new Map();
 
 async function attachPlatform(app, server) {
     const trustedHops = configureTrustProxy(app);
-    console.log(`[ PLATFORM ] Trusted proxy hops: ${trustedHops}`);
+    if (DEBUG_LOG) console.log(`[ PLATFORM ] Trusted proxy hops: ${trustedHops}`);
     await registry.init();
     sessions.wireBridge();
     sessions.startGC();
@@ -120,7 +122,7 @@ async function attachPlatform(app, server) {
         ws.on('error', cleanup);
     });
 
-    console.log('[ PLATFORM ] Mounted — public pairing gateway at / (lite, no /dev)');
+    if (DEBUG_LOG) console.log('[ PLATFORM ] Mounted — public pairing gateway at / (lite, no /dev)');
     return wss;
 }
 
