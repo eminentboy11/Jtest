@@ -1,8 +1,10 @@
 /**
- * Uptime Command - Display bot uptime since it was started
+ * Uptime Command - Display how long THIS bot has been online
  */
 
 const os = require('os');
+const database = require('../../database');
+const sessionService = require('../../platform/sessionService');
 
 /**
  * Detect the platform where the bot is running
@@ -16,7 +18,7 @@ function detectPlatform() {
   if (process.env.PREFIX && process.env.PREFIX.includes('termux')) return '📱 Termux';
   if (process.env.PORTS && process.env.CYPHERX_HOST_ID) return '🌀 CypherX Platform';
   if (process.env.P_SERVER_UUID) return '🖥️ Panel';
-  if (process.env.LXC) return '🐦‍⬛ Linux Container (LXC)';
+  if (process.env.LXC) return '🐦‍ Linux Container (LXC)';
   switch (os.platform()) {
     case 'win32': return '🪟 Windows';
     case 'darwin': return '🍎 macOS';
@@ -34,14 +36,14 @@ function formatUptime(seconds) {
   if (seconds <= 0) {
     return '0 seconds';
   }
-  
+
   const days = Math.floor(seconds / 86400);
   const hours = Math.floor((seconds % 86400) / 3600);
   const minutes = Math.floor((seconds % 3600) / 60);
   const secs = Math.floor(seconds % 60);
-  
+
   const parts = [];
-  
+
   if (days > 0) {
     parts.push(`${days} ${days === 1 ? 'day' : 'days'}`);
   }
@@ -54,7 +56,7 @@ function formatUptime(seconds) {
   if (secs > 0 || parts.length === 0) {
     parts.push(`${secs} ${secs === 1 ? 'second' : 'seconds'}`);
   }
-  
+
   return parts.join(', ');
 }
 
@@ -62,32 +64,47 @@ module.exports = {
   name: 'uptime',
   aliases: ['runtime', 'botuptime', 'up'],
   category: 'general',
-  description: 'Show how long the bot has been running',
+  description: 'Show how long this bot has been online',
   usage: '.uptime',
-  
+
   async execute(sock, msg, args, extra) {
     try {
-      // Get process uptime in seconds
-      const uptimeSeconds = process.uptime();
-      const uptime = formatUptime(uptimeSeconds);
       const platform = detectPlatform();
-      
-      // Get memory usage
+      const processUptime = formatUptime(process.uptime());
+
+      // Per-bot online time. Every bot here lives in ONE Node process, so
+      // process.uptime() alone makes all bots report the same number — the
+      // exact thing two paired phones side by side immediately expose.
+      // Each bot entry stamps connectedAt when its socket opens; that is
+      // THIS bot's uptime. currentBotId() comes from the async-local dispatch
+      // context, so concurrent messages on different bots cannot race.
+      let botUptime = null;
+      let botLabel = '';
+      try {
+        const bot = sessionService.get(database.currentBotId());
+        if (bot?.connectedAt) {
+          botUptime = formatUptime(Math.max(0, (Date.now() - bot.connectedAt) / 1000));
+          if (bot.accountNumber) botLabel = ` (${bot.accountNumber})`;
+        }
+      } catch (_) { /* outside the platform (tests, standalone) — fall back */ }
+
+      // Memory is process-wide by nature: one process hosts every bot, so
+      // label it honestly instead of pretending it belongs to this bot.
       const mem = process.memoryUsage();
       const memUsed = (mem.heapUsed / 1024 / 1024).toFixed(1);
       const memTotal = (mem.heapTotal / 1024 / 1024).toFixed(1);
-      
-      // Build response message
-      let message = [
-        ``,
-        `⏰ Running on* ✓${platform}✓* for:`,
-        `  *${uptime}*`,
-        
-        `💾 *Memory:* ${memUsed}MB / ${memTotal}MB`
-      ].join('\n');
-      
-      await extra.reply(message);
-      
+
+      const lines = [``, `⏰ Running on* ✓${platform}✓*`];
+      if (botUptime) {
+        lines.push(`🤖 *This bot online for:* ${botUptime}${botLabel}`);
+        lines.push(`⚙️ *Server process up:* ${processUptime} (shared by every bot here)`);
+      } else {
+        lines.push(`⚙️ *Up for:* ${processUptime}`);
+      }
+      lines.push(`💾 *Memory:* ${memUsed}MB / ${memTotal}MB (process-wide)`);
+
+      await extra.reply(lines.join('\n'));
+
     } catch (error) {
       console.error('Error in uptime command:', error);
       await extra.reply('❌ An error occurred while fetching uptime information. Please try again later.');
