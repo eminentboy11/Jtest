@@ -15,7 +15,7 @@ const APP_HTML = fs.readFileSync(path.join(__dirname, 'tod-app.html'), 'utf8');
 module.exports = {
     name: 'tod',
     aliases: ['truthordare', 'spin'],
-    category: 'fun',
+    category: 'games',
     description: 'TEST: Truth or Dare wheel — mini-app version (render in chat)',
     usage: '.tod',
 

@@ -182,7 +182,7 @@ module.exports = {
     games, // exported for handler access
     name:        'ttt2',
     aliases:     ['xo2', 'tictactoebot'],
-    category:    'fun',
+    category:    'games',
     description: 'TEST: Tic-Tac-Toe 2 — fully card based (menu, rooms, board)',
     usage:       '.ttt2',
 
