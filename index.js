@@ -204,12 +204,17 @@ async function bootBot(botId, opts = {}) {
                 // Send startup message via WDP style
                 try {
                     const selfJid = sock.user?.id ? sock.user.id.split(':')[0] + '@s.whatsapp.net' : null;
+                    const prefix = database.getBotSetting('prefix') === '' ? 'none' : (database.getBotSetting('prefix') || '.')
+        global.platform = detectPlatform()
+        const ownerName = (Array.isArray(juneDatabase.getOwnerNames()) ? database.getOwnerNames()[0] : database.getOwnerNames()) || 'Bot Owner'
+
+        const welcomeText = applyFont(
                     const welcomeText = applyFont(
 `┏━━━✧ JUNE X WEB ✧━━━━
 ┃✧ Bot: ${database.getBotSetting('botName')}
 ┃✧ Prefix: [ ${prefix} ]
 ┃✧ Owner: ${ownerName}
-┃✧ Platform: ${platform}
+┃✧ Platform: ${global.platform}
 ┃✧ Status: online 
 ┃✧ Time: ${new Date().toLocaleString()}
 ┃✧ Commands: ${commandCount()}
