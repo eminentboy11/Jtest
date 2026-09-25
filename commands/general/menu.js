@@ -282,7 +282,7 @@ function buildMenuText(cats, totalCount, speed, filter = '') {
 
     if (settings.showPluginCount) {
         menu +=
-            `┃ Cᴏᴍᴍᴀɴᴅꜱ: ${totalCount}`;
+            `┃ Cᴏᴍᴍᴀɴᴅꜱ: ${totalCount}\n`;
     }
 
     menu +=
