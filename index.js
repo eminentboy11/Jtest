@@ -133,6 +133,16 @@ async function bootBot(botId, opts = {}) {
     const gen = bot.bootGen;
     const stale = () => bots.get(bot.id) !== bot || bot.bootGen !== gen;
 
+    // One live socket per session, always. A half-dead old socket sharing the
+    // session is exactly what WhatsApp terminates with 428 Connection
+    // Terminated — which from the outside reads as "the bot keeps restarting".
+    if (bot.sock) {
+        const oldSock = bot.sock;
+        bot.sock = null;
+        try { oldSock.ev?.removeAllListeners?.(); } catch (_) {}
+        try { oldSock.end?.(new Error('replaced by new boot')); } catch (_) {}
+    }
+
     bot.state = 'connecting';
     bot.lastError = null;
     bot.reconnectCount = bot.reconnectCount || 0;
@@ -225,6 +235,8 @@ async function bootBot(botId, opts = {}) {
                 bot.pairing.exhausted = false;
                 bot.pairing._requested = false;
                 bot.reconnectCount = 0;
+                bot._reconnecting = false;
+                bot.err503 = 0; bot.err408 = 0; bot.errConflict = 0;
                 console.log(`[ ${bot.id} ] ✅ Connected as ${bot.accountNumber || sock.user?.id}`);
                 await registry.markPaired(bot.id, bot.accountNumber).catch(() => {});
                 try { slots.setPaired(bot.id, bot.accountNumber); } catch (_) {}
@@ -244,6 +256,7 @@ async function bootBot(botId, opts = {}) {
 
             if (connection === 'close') {
                 if (stale()) return;   // purged or rebooted elsewhere; this socket is history
+                if (bot._reconnecting) return;   // duplicate close events: one reconnect in flight per bot
                 const reason = lastDisconnect?.error?.message || 'unknown';
                 debugLog(`[ ${bot.id} ] Close: status=${statusCode} reason=${reason} pairingDone=${bot.pairingDone}`);
 
@@ -263,9 +276,12 @@ async function bootBot(botId, opts = {}) {
                         console.log(`[ ${bot.id} ] 401 conflict — another client took over; session kept, reconnect in 15s`);
                         bot.state = 'connecting';
                         bot.lastError = '401 conflict (takeover)';
+                        bot._reconnecting = true;
                         await delay(15000);
                         if (stale()) return;
-                        bootBot(bot.id, { force: true }).catch(e => console.log(`[ ${bot.id} ] Conflict reconnect failed: ${e.message}`));
+                        bootBot(bot.id, { force: true })
+                            .then(() => { bot._reconnecting = false; })
+                            .catch(e => { console.log(`[ ${bot.id} ] Conflict reconnect failed: ${e.message}`); bot._reconnecting = false; });
                         return;
                     }
                     debugLog(`[ ${bot.id} ] 401 logged out — purging everything for this botId`);
@@ -280,11 +296,35 @@ async function bootBot(botId, opts = {}) {
                     return;
                 }
                 bot.reconnectCount++;
-                console.log(`[ ${bot.id} ] Reconnect #${bot.reconnectCount} in 5s (status ${statusCode}) ${reason}`);
+
+                // Per-status backoff, WDP's table (their index.js ~1350-1400).
+                // The flat 5s hammer is what turned transient WhatsApp hiccups
+                // into a reconnect loop: 503 means their edge dropped the
+                // stream (give it room — linear 30s steps capped at 5 min),
+                // 408 gets exponential backoff with jitter, 500 a plain 10s,
+                // and 428/440/409 mean another socket holds the session —
+                // back off harder so the duplicate can die first.
+                let waitMs = 5000;
+                if (statusCode === 503) {
+                    bot.err503 = (bot.err503 || 0) + 1;
+                    waitMs = Math.min(30000 * bot.err503, 300000);
+                } else if (statusCode === 408) {
+                    bot.err408 = (bot.err408 || 0) + 1;
+                    waitMs = Math.min(5000 * Math.pow(2, Math.min(bot.err408, 3)) + Math.floor(Math.random() * 1000), 60000);
+                } else if (statusCode === 500) {
+                    waitMs = 10000;
+                } else if (statusCode === 428 || statusCode === 440 || statusCode === 409) {
+                    bot.errConflict = (bot.errConflict || 0) + 1;
+                    waitMs = Math.min(15000 * bot.errConflict, 120000);
+                }
+                console.log(`[ ${bot.id} ] Reconnect #${bot.reconnectCount} in ${Math.round(waitMs / 1000)}s (status ${statusCode}) ${reason}`);
                 bot.state = 'connecting';
-                await delay(5000);
+                bot._reconnecting = true;
+                await delay(waitMs);
                 if (stale()) return;
-                bootBot(bot.id, { force: true }).catch(e => console.log(`[ ${bot.id} ] Reconnect failed: ${e.message}`));
+                bootBot(bot.id, { force: true })
+                    .then(() => { bot._reconnecting = false; })
+                    .catch(e => { console.log(`[ ${bot.id} ] Reconnect failed: ${e.message}`); bot._reconnecting = false; });
             }
         } catch (e) { console.log(`[ ${bot.id} ] conn.update error: ${e.message}`); }
     });
