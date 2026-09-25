@@ -7,7 +7,7 @@
 
 const { test, describe, before } = require('node:test');
 const assert = require('node:assert');
-const { decideFailure, _resetFailureWindow, FAILURE, ROUTINE } = require('../utils/silenceLibsignal');
+const { decideFailure, classify, _resetFailureWindow, FAILURE, ROUTINE, STACK_FRAME } = require('../utils/silenceLibsignal');
 
 const BAD_MAC = 'Session error:Error: Bad MAC Error: Bad MAC';
 const STACK = 'Session error:Error: Bad MAC\n    at Object.verifyMAC (crypto.js:87:15)\n    at SessionCipher.doDecryptWhisperMessage (session_cipher.js:250:16)';
@@ -50,5 +50,31 @@ describe('libsignal failure flood control', () => {
   test('FAILURE patterns cover the Bad MAC family', () => {
     assert.ok(FAILURE.some((re) => re.test(BAD_MAC)));
     assert.ok(FAILURE.some((re) => re.test('Failed to decrypt message with any known session...')));
+  });
+
+  test('classify: routine lines drop, failures condense, plain output passes', () => {
+    _resetFailureWindow();
+    assert.deepEqual(classify('Closing session: SessionEntry { _chains: {} }', 7_000_000), { action: 'drop' });
+    const first = classify(STACK, 7_000_000);
+    assert.equal(first.action, 'print');
+    assert.ok(!first.line.includes('\n'));
+    assert.deepEqual(classify(STACK, 7_000_001), { action: 'drop' });
+    assert.deepEqual(classify('[ BOOT ] Commands ready — 31 commands', 7_000_002), { action: 'pass' });
+  });
+
+  test('stack-frame writes are swallowed only inside the 2.5s post-failure window', () => {
+    _resetFailureWindow();
+    classify(BAD_MAC, 8_000_000);                      // opens the stack window
+    const frame = '    at SessionCipher.doDecryptWhisperMessage (/x/libsignal/src/session_cipher.js:250:16)';
+    assert.deepEqual(classify(frame, 8_000_000 + 1000), { action: 'drop' });
+    assert.ok(STACK_FRAME.some((re) => re.test(frame)));
+    // after the window the same frame shape passes (real crashes stay visible)
+    assert.deepEqual(classify(frame, 8_000_000 + 4000), { action: 'pass' });
+  });
+
+  test('a genuine crash stack (no preceding failure line) passes in full', () => {
+    _resetFailureWindow();
+    const crash = 'Error: boom in our code\n    at Object.<anonymous> (/app/index.js:10:1)';
+    assert.deepEqual(classify(crash, 9_000_000), { action: 'pass' });
   });
 });
