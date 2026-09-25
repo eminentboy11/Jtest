@@ -207,9 +207,7 @@ async function bootBot(botId, opts = {}) {
                     const prefix = database.getBotSetting('prefix') === '' ? 'none' : (database.getBotSetting('prefix') || '.')
         global.platform = detectPlatform()
         const ownerName = (Array.isArray(juneDatabase.getOwnerNames()) ? database.getOwnerNames()[0] : database.getOwnerNames()) || 'Bot Owner'
-
-        const welcomeText = applyFont(
-                    const welcomeText = applyFont(
+const welcomeText = applyFont(
 `┏━━━✧ JUNE X WEB ✧━━━━
 ┃✧ Bot: ${database.getBotSetting('botName')}
 ┃✧ Prefix: [ ${prefix} ]
