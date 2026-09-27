@@ -56,6 +56,17 @@ describe('syntax', () => {
     .filter((n) => n.endsWith('.js'))
     .map((n) => path.join(__dirname, n))];
 
+  test('mintId makes short, unique, filesystem-safe bot ids', () => {
+    const { mintId } = require('../platform/sessionService');
+    const seen = new Set();
+    for (let i = 0; i < 500; i++) {
+      const id = mintId();
+      assert.ok(/^web-[A-Za-z0-9]{5}$/.test(id), id);
+      seen.add(id);
+    }
+    assert.ok(seen.size > 490, `expected near-unique ids, got ${seen.size}`);
+  });
+
   test('every JavaScript file parses', () => {
     const broken = [];
     for (const f of files) {

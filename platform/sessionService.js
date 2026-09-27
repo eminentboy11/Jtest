@@ -31,7 +31,7 @@ function requireEngine() {
 }
 
 function qrEntry() {
-    const id = `web-${crypto.randomBytes(5).toString('hex')}`;
+    const id = mintId();
     return { id, name: `June X ${id.slice(-3)}`, qrLogin: true };
 }
 
@@ -128,7 +128,19 @@ function list() { return requireEngine().list(); }
 function snapshot() { return requireEngine().snapshot(); }
 function activeCount() { return list().length; }
 
+// ── Bot ids ─────────────────────────────────────────────────────────────────
+// Short and log-friendly: web-oPqpo, not web-mukleok0-c9e6. 5 base62 chars
+// ≈ 916M space; callers re-roll on collision against the bots map, the auth
+// dir and the data file, so birthday luck is never the only guard.
+const ID_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+function mintId(len = 5) {
+  let s = '';
+  for (let i = 0; i < len; i++) s += ID_ALPHABET[crypto.randomInt(ID_ALPHABET.length)];
+  return `web-${s}`;
+}
+
 module.exports = {
+  mintId,
     configure,
     configured,
     _resetForTests: resetForTests,

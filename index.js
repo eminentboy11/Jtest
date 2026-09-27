@@ -356,7 +356,13 @@ async function bootBot(botId, opts = {}) {
 sessionService.configure({
     async provision(entry, { source, mode }) {
         const isQr = mode === 'qr' || entry.qrLogin;
-        const id = entry.id || `web-${Date.now().toString(36)}-${Math.random().toString(36).slice(2,6)}`;
+        let id = entry.id;
+        if (!id) {
+            do { id = sessionService.mintId(); }
+            while (bots.has(id)
+                || fs.existsSync(path.join(AUTH_ROOT, id))
+                || fs.existsSync(database.botDataFile(id)));
+        }
         const phone = (entry.phone || '').replace(/\D/g, '') || null;
         if (bots.has(id)) return { ok: false, reason: 'duplicate-id', id };
         if (bots.size >= MAX_BOTS) return { ok: false, reason: 'quota', id };
