@@ -42,3 +42,4 @@ Thumbs.db
 # Lockfiles (keep package-lock for reproducibility in Dashboard Edition)
 # yarn.lock is ignored, npm lock kept
 yarn.lock
+.june-coldrepo/
