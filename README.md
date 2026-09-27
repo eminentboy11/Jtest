@@ -14,6 +14,7 @@ Previous edition was **9MB + 700 deps (48 packages, ffmpeg, sharp, jimp, ytdl, s
 - **No message store** and no group metadata cache; `.antidelete` keeps a capped 1,000-entry replay cache in the per-bot JSON instead
 - **No dev dashboard** (`/dev` removed), no `logStore`, no MongoDB registry
 - **No JUNE_SESSIONS env** — sessions only via web UI at `/`, persisted in `data/platform-registry.json`
+- **Tiered storage** — HOT RAM (LRU bot stores, idle unload) → WARM disk (`data/` + `auth/`) → COLD GitHub (`june-web-data`: one `bots/<id>.tar.gz` per offline+idle bot, pushed over the git wire protocol, zero REST quota). Live bots are never archived; waking a cold bot is one pull+extract. `JUNE_DATA_REPO` empty = feature off
 - **Quiet console by default** — per-bot lifecycle chatter (event dumps, close reasons, pairing attempts, purge traces) logs only with `DEBUG=true` in env; otherwise only actionable lines print
 - **No JUNE_PLATFORM toggle** — always web
 - **30 commands shipped** behind a real hot-reloading loader — drop a file in `commands/` and it registers without a restart:

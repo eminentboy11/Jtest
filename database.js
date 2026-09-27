@@ -212,7 +212,16 @@ function emptyStore() {
   };
 }
 
-const stores = new Map();   // botId -> data
+const stores = new Map();   // botId -> data (HOT tier — see LRU below)
+const lastAccess = new Map(); // botId -> ms, drives LRU eviction
+
+// HOT-tier caps: with 100+ bots we cannot keep every store in RAM forever.
+// Idle stores are flushed and dropped; the next access reloads from disk in
+// microseconds. Env-tunable so a big VPS can raise them.
+const HOT_IDLE_MS = Number(process.env.JUNE_HOT_IDLE_MIN || 30) * 60_000;
+const HOT_MAX_STORES = Number(process.env.JUNE_HOT_STORES || 25);
+const KV_MAX_PER_NS = Number(process.env.JUNE_KV_MAX_PER_NS || 500);
+let lastSweep = 0;
 const dirty = new Set();    // botIds awaiting a write
 const timers = new Map();   // botId -> Timeout
 let shuttingDown = false;
@@ -237,9 +246,43 @@ function purgeBot(botId) {
   try { fs.rmSync(filePath(id), { force: true }); } catch (_) {}
 }
 
+function touch(botId) { lastAccess.set(botId, Date.now()); }
+
+/**
+ * Drop idle (and over-cap LRU) stores from RAM after flushing them.
+ * Skips: stores with pending debounced writes, and the bot whose async-local
+ * context is currently executing (evicting mid-dispatch would be rude).
+ */
+function evictIdle(now = Date.now(), force = false) {
+  if (!force && now - lastSweep < 60_000) return [];
+  lastSweep = now;
+  const live = als.getStore()?.botId || null;
+  const evicted = [];
+  const evictable = () => [...stores.keys()].filter((id) =>
+    id !== live && !dirty.has(id) && !timers.has(id));
+  for (const id of evictable()) {
+    if (now - (lastAccess.get(id) || 0) > HOT_IDLE_MS) {
+      stores.delete(id); lastAccess.delete(id); evicted.push(id);
+    }
+  }
+  // over the cap: drop least-recently-used first
+  const cand = evictable().sort((a, b) => (lastAccess.get(a) || 0) - (lastAccess.get(b) || 0));
+  while (stores.size > HOT_MAX_STORES && cand.length) {
+    const id = cand.shift();
+    if (!stores.has(id)) continue;
+    stores.delete(id); lastAccess.delete(id); evicted.push(id);
+  }
+  return evicted;
+}
+
+function lruStats() {
+  return { hot: stores.size, max: HOT_MAX_STORES, idleMs: HOT_IDLE_MS, kvMax: KV_MAX_PER_NS };
+}
+
 function load(botId) {
   const existing = stores.get(botId);
-  if (existing) return existing;
+  if (existing) { touch(botId); return existing; }
+  evictIdle();
 
   let data = emptyStore();
   const file = filePath(botId);
@@ -265,6 +308,7 @@ function load(botId) {
   }
 
   stores.set(botId, data);
+  touch(botId);
   return data;
 }
 
@@ -683,6 +727,10 @@ const setKV = (namespace, key, value) => {
   const ns = String(namespace);
   store().kv[ns] = store().kv[ns] || {};
   store().kv[ns][String(key)] = value;
+  // antidelete-style KV grows forever otherwise; insertion order = age order,
+  // so dropping the first keys prunes the oldest entries.
+  const keys = Object.keys(store().kv[ns]);
+  for (let i = 0; keys.length - i > KV_MAX_PER_NS; i++) delete store().kv[ns][keys[i]];
   markDirty();
   return true;
 };
@@ -796,7 +844,7 @@ module.exports = {
 
   // bot context
   runAsBot, currentBotId, DEFAULT_BOT_ID, listBotIds, getDataDir,
-  botDataFile: filePath, purgeBot,
+  botDataFile: filePath, purgeBot, evictIdle, lruStats,
 
   // settings
   getBotSetting, setBotSetting, updateBotSettings, getAllBotSettings,

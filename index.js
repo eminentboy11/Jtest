@@ -27,6 +27,7 @@ const registry = require('./platform/registry');
 const sessionService = require('./platform/sessionService');
 const slots = require('./platform/slots');
 const { purgeBot } = require('./platform/purge');
+const coldArchive = require('./utils/coldArchive');
 
 const RAW_PORT = process.env.SERVER_PORT || process.env.PTERODACTYL_PORT || process.env.PORT || '3000';
 const PORT = Number(RAW_PORT) || 3000;
@@ -107,6 +108,7 @@ async function handleMessage(bot, sock, msg) {
         return;
     }
     try {
+        coldArchive.touch(bot.id);
         await database.runAsBot(bot.id, async () => {
             global.currentSock = sock;
             global.botState = bot.state;
@@ -237,6 +239,7 @@ async function bootBot(botId, opts = {}) {
                 bot.reconnectCount = 0;
                 bot._reconnecting = false;
                 bot.err503 = 0; bot.err408 = 0; bot.errConflict = 0;
+                try { coldArchive.touch(bot.id); } catch (_) {}
                 console.log(`[ ${bot.id} ] ✅ Connected as ${bot.accountNumber || sock.user?.id}`);
                 await registry.markPaired(bot.id, bot.accountNumber).catch(() => {});
                 try { slots.setPaired(bot.id, bot.accountNumber); } catch (_) {}
@@ -286,6 +289,7 @@ async function bootBot(botId, opts = {}) {
                     }
                     debugLog(`[ ${bot.id} ] 401 logged out — purging everything for this botId`);
                     await purgeBot(bot.id, { reason: 'whatsapp-logout-401', bots, authRoot: AUTH_ROOT });
+                    try { coldArchive.deleteRemote(bot.id); } catch (_) {}
                     return;
                 }
                 if (bot.reconnectCount >= 10) {
@@ -405,6 +409,9 @@ sessionService.configure({
     },
     async reconnect(botId) {
         const id = String(botId);
+        if (coldArchive.isArchived(id)) {
+            if (!coldArchive.restoreBot(id)) return { ok: false, reason: 'cold-restore-failed', id };
+        }
         const bot = bots.get(id);
         if (!bot) return { ok: false, reason: 'unknown', id };
         try { await bootBot(id, { force: true }); return { ok: true, id, connected: bot.state === 'connected' }; }
@@ -453,6 +460,11 @@ attachPlatform(app, server).then(async () => {
             } catch (e) { console.log('[ BOOT ] Auth scan failed:', e.message); }
         }
         if (entries.length) {
+            const coldOnes = entries.filter((e) => coldArchive.isArchived(e.id));
+            if (coldOnes.length) {
+                console.log(`[ BOOT ] ${coldOnes.length} bot(s) cold on GitHub — skipped (wake via panel/reconnect): ${coldOnes.map((e) => e.id).join(', ')}`);
+                entries = entries.filter((e) => !coldArchive.isArchived(e.id));
+            }
             console.log(`[ BOOT ] Restoring ${entries.length} persisted session(s) from ${source}...`);
             const res = await sessionService.restorePersisted(entries);
             debugLog(`[ BOOT ] Restore result: ${JSON.stringify(res)} — bots now ${bots.size}`);
@@ -470,6 +482,14 @@ attachPlatform(app, server).then(async () => {
         console.log(`[ GATEWAY ] Pairing UI → /  (at :${PORT}/)`);
         console.log(`[ HEALTH ] :${PORT}/health | :${PORT}/health/details | :${PORT}/status`);
         console.log(`[ BOTS ] ${bots.size}/${MAX_BOTS} active | WDP: ${commandCount()} commands + ${aliasCount()} aliases`);
+        coldArchive.configure({
+            isActive: (id) => {
+                const b = bots.get(id);
+                return Boolean(b && (b.state === 'connected' || b.state === 'connecting'));
+            },
+        });
+        coldArchive.start();
+        if (coldArchive.enabled()) console.log(`[ COLD ] GitHub warehouse: ${coldArchive.CFG.repo} (archive after ${coldArchive.CFG.idleDays}d offline+idle)`);
         console.log(`[ DB ] JSON store — one file per bot: ${database.getDataDir()}/<botId>.json | Shared commands: ${commandCount()}`);
         console.log('='.repeat(60) + '\n');
     });
