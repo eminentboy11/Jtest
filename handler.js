@@ -670,8 +670,8 @@ const isSystemJid = (jid) => {
 // Main message handler
 const handleMessage = async (sock, msg) => {
   try {
-    // Debug logging to see all messages
-    // Debug log removed
+    // Raw message dump (DEBUG=true only — full Baileys shape, media msgs get big)
+    if (process.env.DEBUG) console.log('[RAW MSG]', JSON.stringify(msg, null, 2));
 
     if (!msg.message) return;
 
