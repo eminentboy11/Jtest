@@ -213,6 +213,34 @@ describe('antiall content protections', () => {
     assert.ok(s._rec.deletes.length >= 1, 'the voice note must be deleted');
   });
 
+  test('antivideo deletes a member video', async () => {
+    setGS({ antilink: false, antiimage: false, antivideo: true });
+    const s = H.makeSock();
+    await run(s, H.makeMsg({ videoMessage: { mimetype: 'video/mp4' } }, { sender: fresh() }));
+    await H.sleep(300);
+    assert.ok(s._rec.deletes.length >= 1, 'the video must be deleted');
+    assert.ok(s._rec.texts.some((t) => /Anti-Video/i.test(t)));
+  });
+
+  test('antidocument deletes a member file', async () => {
+    setGS({ antilink: false, antivideo: false, antidocument: true });
+    const s = H.makeSock();
+    await run(s, H.makeMsg({ documentMessage: { fileName: 'index.js', mimetype: 'text/javascript' } }, { sender: fresh() }));
+    await H.sleep(300);
+    assert.ok(s._rec.deletes.length >= 1, 'the document must be deleted');
+    assert.ok(s._rec.texts.some((t) => /Anti-File/i.test(t)));
+  });
+
+  test('antiimage deletes a VIEW-ONCE photo (unwrapped probe)', async () => {
+    setGS({ antidocument: false, antiimage: true });
+    const s = H.makeSock();
+    await run(s, H.makeMsg(
+      { viewOnceMessageV2: { message: { imageMessage: { caption: 'peek' } } } },
+      { sender: fresh() }));
+    await H.sleep(300);
+    assert.ok(s._rec.deletes.length >= 1, 'view-once images must not escape antiimage');
+  });
+
   test('antisticker deletes a member sticker', async () => {
     const s = H.makeSock();
     await run(s, H.makeMsg({ stickerMessage: { mimetype: 'image/webp' } }, { sender: fresh() }));
@@ -283,6 +311,25 @@ describe('antidelete detector (wdp stub-type port)', () => {
     }]);
     await H.sleep(350);
     assert.ok(s._rec.texts.some((t) => t.includes(secret)), 'the original text must be re-sent');
+    database.setAntideleteMode('off');
+  });
+
+  test('revoke with the key ONLY at update.key (production shape) recovers', async () => {
+    database.setAntideleteMode('chat');
+    const { WAMessageStubType } = require('@whiskeysockets/baileys');
+    const s = H.makeSock();
+    const secret = 'updatekey-recover-' + Date.now();
+    await run(s, H.textMsg(secret, { sender: H.MEMBER, id: 'UKSTORE1' }));
+    await H.sleep(200);
+    await handler.handleMessagesUpdate(s, [{
+      key: { remoteJid: H.GROUP, id: 'ENVELOPE-DOES-NOT-MATCH', participant: H.MEMBER },
+      update: {
+        messageStubType: WAMessageStubType.REVOKE,
+        key: { remoteJid: H.GROUP, id: 'UKSTORE1', fromMe: false, participant: H.MEMBER },
+      },
+    }]);
+    await H.sleep(350);
+    assert.ok(s._rec.texts.some((t) => t.includes(secret)), 'update.key must be probed, not just item.key');
     database.setAntideleteMode('off');
   });
 

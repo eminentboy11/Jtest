@@ -179,6 +179,7 @@ const DEFAULT_GROUP_SETTINGS = {
   chatbot: false,
   autosticker: false,
   antiimage: false, antiimageAction: 'delete',
+  antivideo: false, antidocument: false,
   antisticker: false, antistickerAction: 'delete',
   antiaudio: false, antiaudioAction: 'delete',
   antibadword: false, antibadwordAction: 'warn', badwords: [],

@@ -956,16 +956,27 @@ const handleMessage = async (sock, msg) => {
       //    with the old commands, which left .antiall toggling dead switches —
       //    enforcement lives here now so every AntiAll feature actually fires.
       if (!msg.key.fromMe) {
+        // View-once media hides one wrapper deeper (viewOnceMessageV2/V2Extension/V1,
+        // or ephemeral) — probe both layers so the media protections catch it too.
+        const _voInner = content.viewOnceMessageV2Extension?.message ||
+                         content.viewOnceMessageV2?.message ||
+                         content.viewOnceMessage?.message ||
+                         content.ephemeralMessage?.message || {};
+        const _has = (k) => !!(content[k] || _voInner[k]);
         let violation = null;
         if (groupSettings.antilink &&
             /(?:https?:\/\/|www\.)\S+|chat\.whatsapp\.com\/\S+|t\.me\/\S+/i.test(body || '')) {
           violation = '🔗 Anti-Link';
-        } else if (groupSettings.antisticker && content.stickerMessage) {
+        } else if (groupSettings.antisticker && _has('stickerMessage')) {
           violation = '🎭 Anti-Sticker';
-        } else if (groupSettings.antiimage && content.imageMessage) {
+        } else if (groupSettings.antiimage && _has('imageMessage')) {
           violation = '🖼️ Anti-Image';
-        } else if (groupSettings.antiaudio && content.audioMessage) {
+        } else if (groupSettings.antivideo && _has('videoMessage')) {
+          violation = '🎬 Anti-Video';
+        } else if (groupSettings.antiaudio && _has('audioMessage')) {
           violation = '🔇 Anti-Audio';
+        } else if (groupSettings.antidocument && _has('documentMessage')) {
+          violation = '📄 Anti-File';
         } else if (groupSettings.antigroupmention &&
             (content.groupMentionedMessage || content.statusMentionMessage ||
              (content.extendedTextMessage?.contextInfo?.mentionedJid || []).some((j) => String(j).endsWith('@g.us')))) {
@@ -1475,40 +1486,47 @@ const handleMessagesUpdate = async (sock, updates) => {
     if (!Array.isArray(updates) || !updates.length) return;
     const { WAMessageStubType } = require('@whiskeysockets/baileys');
 
-    const revokeUpdates = updates.filter(
-      (item) => item.update?.messageStubType === WAMessageStubType.REVOKE
-    );
-
-    // Fallback shape: some Baileys builds surface protocolMessage REVOKE
-    // directly without the stub. Normalize to the same { key } shape
-    // handleDelete expects.
-    const protoUpdates = [];
+    // Baileys delivers deletions in two shapes depending on build/version:
+    //   a) messageStubType === REVOKE, revoked key at item.update.key (and item.key)
+    //   b) protocolMessage type REVOKE(0) inside update.message with proto.key
+    // Normalize BOTH into the { key } shape handleDelete expects — a shape
+    // mismatch here silently swallows deletes in production while tests (which
+    // construct the item themselves) keep passing.
+    const revokes = [];
     for (const u of updates) {
-      if (revokeUpdates.includes(u)) continue;
+      const stub = u?.update?.messageStubType;
       const proto = u?.update?.message?.protocolMessage;
-      if (!proto || !proto.key) continue;
-      const t = proto.type;
-      if (t !== 0 && t !== 'REVOKE') continue;
-      protoUpdates.push({
+
+      let src = null;
+      if (stub === WAMessageStubType?.REVOKE || stub === 1) src = u.update.key || u.key;
+      else if (proto && (proto.type === 0 || proto.type === 'REVOKE') && proto.key) src = proto.key;
+      if (!src || !src.id) continue;
+
+      revokes.push({
         key: {
-          remoteJid: proto.key.remoteJid || u.key?.remoteJid,
-          id: proto.key.id,
-          participant: proto.key.participant || u.key?.participant,
-          fromMe: !!proto.key.fromMe,
+          remoteJid: src.remoteJid || u.key?.remoteJid,
+          id: src.id,
+          participant: src.participant ?? u.key?.participant,
+          fromMe: !!(src.fromMe ?? u.key?.fromMe),
         },
       });
     }
 
-    if (revokeUpdates.length) {
-      const antidelete = commands.get('antidelete');
-      if (antidelete?.handleDelete) await antidelete.handleDelete(sock, revokeUpdates);
-
-      const antideletestatus = commands.get('antideletestatus');
-      if (antideletestatus?.handleStatusDelete) await antideletestatus.handleStatusDelete(sock, revokeUpdates);
+    if (process.env.DEBUG) {
+      try {
+        const stubs = updates.map((u) => u?.update?.messageStubType).filter((x) => x !== undefined);
+        console.log(`[ANTIDELETE] messages.update n=${updates.length} stubs=[${stubs}] revokes=${revokes.length}`);
+      } catch (_) {}
     }
-    if (protoUpdates.length) {
-      const antidelete = commands.get('antidelete');
-      if (antidelete?.handleDelete) await antidelete.handleDelete(sock, protoUpdates);
+    if (!revokes.length) return;
+
+    const antidelete = commands.get('antidelete');
+    if (antidelete?.handleDelete) await antidelete.handleDelete(sock, revokes);
+
+    const antideletestatus = commands.get('antideletestatus');
+    if (antideletestatus?.handleStatusDelete) {
+      const statusRevokes = revokes.filter((r) => r.key.remoteJid === 'status@broadcast');
+      if (statusRevokes.length) await antideletestatus.handleStatusDelete(sock, statusRevokes);
     }
   } catch (_) {}
 };
