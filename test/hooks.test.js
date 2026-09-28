@@ -46,6 +46,7 @@ after(() => H.teardown(handler, database));
 const setGS = (patch) => database.runAsBot(A, () => database.updateGroupSettings(H.GROUP, patch));
 const getGS = (botId = A) => database.runAsBot(botId, () => database.getGroupSettings(H.GROUP));
 const run = (sock, m, botId = A) => H.dispatch(database, handler, botId, sock, m);
+const setAdMode = (m) => database.runAsBot(A, () => database.setAntideleteMode(m));
 /** All five commands are adminOnly + groupOnly, so config comes from the admin. */
 const runCmd = (sock, text, botId = A) =>
   run(sock, H.textMsg(text, { sender: H.ADMIN }), botId);
@@ -249,6 +250,44 @@ describe('antiall content protections', () => {
   });
 });
 
+describe('antidelete store hygiene (multi-user scale)', () => {
+  const AD = () => require('../commands/owner/antidelete');
+
+  test('capture is fully skipped while mode is off', async () => {
+    setAdMode('off');
+    const ad = AD();
+    const before = ad._internals.messageStore.size;
+    await run(H.makeSock(), H.textMsg('should not be stored', { sender: H.MEMBER, id: 'NOCAP1' }));
+    await H.sleep(150);
+    assert.equal(ad._internals.messageStore.size, before, 'nothing may be stored while off');
+  });
+
+  test('global RAM cap trims oldest entries, newest survive', () => {
+    setAdMode('chat');
+    const ad = AD();
+    ad._internals.setRamLimit(5);
+    try {
+      for (let i = 1; i <= 8; i++) {
+        ad.storeMessage(H.textMsg(`m${i}`, { sender: H.MEMBER, id: 'RAM' + i }));
+      }
+      let total = 0;
+      for (const m of ad._internals.messageStore.values()) total += m.size;
+      assert.ok(total <= 5, `total ${total} must respect the global cap`);
+      assert.ok(!JSON.stringify([...ad._internals.messageStore.values()].flatMap((m) => [...m.keys()])).includes('RAM1'), 'oldest must be evicted');
+    } finally {
+      ad._internals.setRamLimit(4000);
+    }
+  });
+
+  test('mode survives a flood of message keys in the KV namespace', () => {
+    setAdMode('chat');
+    // 700 msg keys push the generic 500-key KV prune — the mode must not live
+    // in that crossfire anymore (it reads from bot_settings now).
+    for (let i = 0; i < 700; i++) database.setKV('antidelete', `msg:flood${i}`, { storedAt: i });
+    assert.equal(database.runAsBot(A, () => database.getAntideleteMode()), 'chat');
+  });
+});
+
 describe('antiall master gate (pipeline-first)', () => {
   // unique sender per test (antispam's tracker is module-level per sender)
   let __mn = 0;
@@ -290,38 +329,42 @@ describe('antiall master gate (pipeline-first)', () => {
 });
 
 describe('antidelete detector (wdp stub-type port)', () => {
+  // index.js wraps the messages.update listener in runAsBot(bot.id) — mirror that
+  // here, or the detector reads the default bot's (off) mode and bails.
+  const del = (s, items) => database.runAsBot(A, () => handler.handleMessagesUpdate(s, items));
+
   test('non-revoke updates are ignored without error', async () => {
     const s = H.makeSock();
-    await handler.handleMessagesUpdate(s, [
+    await del(s, [
       { key: { remoteJid: H.GROUP, id: 'X1', participant: H.MEMBER }, update: { status: 3 } },
     ]);
   });
 
   test('a WAMessageStubType.REVOKE update recovers the stored message', async () => {
-    database.setAntideleteMode('chat');
+    setAdMode('chat');
     const { WAMessageStubType } = require('@whiskeysockets/baileys');
     const s = H.makeSock();
     const secret = 'stub-recover-' + Date.now();
     await run(s, H.textMsg(secret, { sender: H.MEMBER, id: 'STUBSTORE1' }));
     await H.sleep(200);
-    await handler.handleMessagesUpdate(s, [{
+    await del(s, [{
       // Real Baileys REVOKE shape: the REVOKED message's key rides at item.key
       key: { remoteJid: H.GROUP, id: 'STUBSTORE1', fromMe: false, participant: H.MEMBER },
       update: { messageStubType: WAMessageStubType.REVOKE },
     }]);
     await H.sleep(350);
     assert.ok(s._rec.texts.some((t) => t.includes(secret)), 'the original text must be re-sent');
-    database.setAntideleteMode('off');
+    setAdMode('off');
   });
 
   test('revoke with the key ONLY at update.key (production shape) recovers', async () => {
-    database.setAntideleteMode('chat');
+    setAdMode('chat');
     const { WAMessageStubType } = require('@whiskeysockets/baileys');
     const s = H.makeSock();
     const secret = 'updatekey-recover-' + Date.now();
     await run(s, H.textMsg(secret, { sender: H.MEMBER, id: 'UKSTORE1' }));
     await H.sleep(200);
-    await handler.handleMessagesUpdate(s, [{
+    await del(s, [{
       key: { remoteJid: H.GROUP, id: 'ENVELOPE-DOES-NOT-MATCH', participant: H.MEMBER },
       update: {
         messageStubType: WAMessageStubType.REVOKE,
@@ -330,17 +373,17 @@ describe('antidelete detector (wdp stub-type port)', () => {
     }]);
     await H.sleep(350);
     assert.ok(s._rec.texts.some((t) => t.includes(secret)), 'update.key must be probed, not just item.key');
-    database.setAntideleteMode('off');
+    setAdMode('off');
   });
 
   test('revoke where update.key carries a DIFFERENT id than the outer key still recovers', async () => {
-    database.setAntideleteMode('chat');
+    setAdMode('chat');
     const { WAMessageStubType } = require('@whiskeysockets/baileys');
     const s = H.makeSock();
     const secret = 'dualkey-recover-' + Date.now();
     await run(s, H.textMsg(secret, { sender: H.MEMBER, id: 'OUTERKEY1' }));
     await H.sleep(200);
-    await handler.handleMessagesUpdate(s, [{
+    await del(s, [{
       // outer key = the ORIGINAL message (wdp's source); update.key = the
       // revoke envelope with its own id — both must be probed.
       key: { remoteJid: H.GROUP, id: 'OUTERKEY1', fromMe: false, participant: H.MEMBER },
@@ -351,22 +394,22 @@ describe('antidelete detector (wdp stub-type port)', () => {
     }]);
     await H.sleep(350);
     assert.ok(s._rec.texts.some((t) => t.includes(secret)), 'outer-key id must be probed');
-    database.setAntideleteMode('off');
+    setAdMode('off');
   });
 
   test('protocolMessage fallback still works', async () => {
-    database.setAntideleteMode('chat');
+    setAdMode('chat');
     const s = H.makeSock();
     const secret = 'proto-recover-' + Date.now();
     await run(s, H.textMsg(secret, { sender: H.MEMBER, id: 'PROTOSTORE1' }));
     await H.sleep(200);
-    await handler.handleMessagesUpdate(s, [{
+    await del(s, [{
       key: { remoteJid: H.GROUP, id: 'P9', participant: H.MEMBER },
       update: { message: { protocolMessage: { type: 0, key: { remoteJid: H.GROUP, id: 'PROTOSTORE1', participant: H.MEMBER, fromMe: false } } } },
     }]);
     await H.sleep(350);
     assert.ok(s._rec.texts.some((t) => t.includes(secret)), 'the original text must be re-sent');
-    database.setAntideleteMode('off');
+    setAdMode('off');
   });
 });
 

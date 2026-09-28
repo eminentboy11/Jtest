@@ -756,12 +756,15 @@ const ANTIDELETE_MAX_ENTRIES = 1000;
 const adKey = (chatId, messageId) => `msg:${chatId}|${messageId}`;
 
 const getAntideleteMode = () => {
-  const m = getKV('antidelete', 'mode');
+  // bot_settings is the home (uncapped, per-bot). Legacy fallback: older builds
+  // kept this in the KV 'antidelete' namespace, where the 500-key prune could
+  // evict it and silently reset antidelete to off.
+  const m = getBotSetting('antideleteMode') ?? getKV('antidelete', 'mode');
   return ANTIDELETE_MODES.includes(m) ? m : 'off';
 };
 const setAntideleteMode = (mode) => {
   const m = ANTIDELETE_MODES.includes(mode) ? mode : 'off';
-  setKV('antidelete', 'mode', m);
+  setBotSetting('antideleteMode', m);
   return m;
 };
 const saveAntideleteMessage = (chatId, messageId, payload, storedAt) => {
@@ -779,8 +782,11 @@ const getAntideleteMessage = (chatId, messageId) => getKV('antidelete', adKey(ch
 // antiedit was removed as a product decision; .antiall still reports a mode
 // for it, so the honest answer is a constant 'off' rather than a crash.
 const getAntieditMode = () => 'off';
-const isAntideleteStatusEnabled = () => getKV('antidelete', 'status') === true;
-const setAntideleteStatusEnabled = (on) => setKV('antidelete', 'status', on === true);
+const isAntideleteStatusEnabled = () => {
+  const v = getBotSetting('antideleteStatus') ?? getKV('antidelete', 'status');
+  return v === true;
+};
+const setAntideleteStatusEnabled = (on) => { setBotSetting('antideleteStatus', on === true); return true; };
 
 // menu display toggles (showUptime / showMemory / showProgressBar / ...)
 const getMenuSettings = () => clone(getBotSetting('menuSettings') || {});

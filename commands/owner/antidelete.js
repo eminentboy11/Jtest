@@ -196,9 +196,18 @@ function removeStoredEntry(chatId, messageId) {
   }
 }
 
+// Global in-memory ceiling across ALL chats. Per-chat is capped at 500, but a
+// bot sitting in 30 busy groups would otherwise hold ~15k entries (~40MB+);
+// this bounds total RAM to a panel-friendly ~10MB worst case.
+let ramMax = Number(process.env.JUNE_AD_RAM_MAX) || 4000;
+const setRamLimit = (n) => { ramMax = n; };
+
 const storeMessage = (msg) => {
   try {
     if (!msg?.key?.id || !msg.message) return;
+    // No capture while the feature is off — zero RAM/disk cost for chats that
+    // never use antidelete. (.antidelete on starts capturing from that moment.)
+    if (getMode() === 'off') return;
 
     const chatId = msg.key.remoteJid;
     if (!chatId || chatId === 'status@broadcast') return;
@@ -229,6 +238,17 @@ const storeMessage = (msg) => {
     chatMap.set(msg.key.id, entry);
     if (process.env.DEBUG) console.log(`[ANTIDELETE] stored ${chatId} id=${msg.key.id} (${entry.type})`);
     if (chatMap.size > 500) chatMap.delete(chatMap.keys().next().value);
+
+    // Global FIFO trim: oldest chat first, oldest message within it.
+    let total = 0;
+    for (const m of messageStore.values()) total += m.size;
+    while (total > ramMax) {
+      const oldestChat = messageStore.keys().next().value;
+      const m = messageStore.get(oldestChat);
+      m.delete(m.keys().next().value);
+      if (!m.size) messageStore.delete(oldestChat);
+      total--;
+    }
 
     // SQLite is the persistent record path; the memory Map remains only the
     // immediate hot cache for messages arriving during this process lifetime.
@@ -421,6 +441,7 @@ module.exports = {
 
   storeMessage,
   handleDelete,
+  _internals: { messageStore, pendingPersistence, setRamLimit },
   getStoreStats,
   flush: flushPersistentMessages,
   flushPersistentMessages,
@@ -446,7 +467,10 @@ module.exports = {
     }
     if (sub === 'off') {
       database.setAntideleteMode('off');
-      return reply('🗑️ Anti-Delete set to *OFF*.');
+      // Free the memory immediately — no recovery is expected while off.
+      messageStore.clear();
+      pendingPersistence.clear();
+      return reply('🗑️ Anti-Delete set to *OFF*. Message cache released.');
     }
     return reply('⚠️ Usage: .antidelete on | private | off | status');
   },
