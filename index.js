@@ -343,18 +343,22 @@ async function bootBot(botId, opts = {}) {
         }
     });
 
-    // Deleted-message detection → anti-delete recovery (.antidelete chat/private)
+    // Deleted-message detection → anti-delete recovery (.antidelete chat/private).
+    // MUST run inside this bot's database context: handleDelete reads the
+    // per-bot antidelete mode, and a bare call would see the default bot's
+    // settings (mode 'off') and silently do nothing on multi-bot deployments.
     sock.ev.on('messages.update', async (updates) => {
-        try { await require('./handler').handleMessagesUpdate(sock, updates); } catch {}
+        try { await database.runAsBot(bot.id, () => require('./handler').handleMessagesUpdate(sock, updates)); } catch {}
     });
 
     // Promote/demote/kick events change admin reality — drop the stale
     // bot-admin verdict for that group immediately (was cached for 2 min,
     // which made freshly promoted bots keep saying "bot needs to be admin"),
     // and give anti-demote/anti-promote their enforcement hook.
-    sock.ev.on('group-participants.update', (update) => {
+    sock.ev.on('group-participants.update', async (update) => {
         try { require('./handler').invalidateBotAdmin(update.id); } catch {}
-        try { require('./handler').handleParticipantsUpdate(sock, update); } catch {}
+        // Same context rule: antidemote/antipromote read per-bot group settings.
+        try { await database.runAsBot(bot.id, () => require('./handler').handleParticipantsUpdate(sock, update)); } catch {}
     });
 
     if (bot.mode === 'code' && bot.phone) {
