@@ -265,6 +265,11 @@ describe('concurrency', () => {
 
   test('50 interleaved group messages split cleanly between two bots', async () => {
     const gs = require(path.join(H.REPO, 'utils/groupstats.js'));
+    // The antiall test above leaves the master gate armed for bot A — disarm it
+    // here: this suite is about groupstats isolation, and the pipeline-first
+    // gate would (correctly) delete member messages before they are counted.
+    database.runAsBot(A, () => database.setAntiAllEnabled(H.GROUP, false));
+    database.runAsBot(B, () => database.setAntiAllEnabled(H.GROUP, false));
     const today = new Date().toISOString().slice(0, 10);
     const sockA = H.makeSock({ selfId: H.BOT });
     const sockB = H.makeSock({ selfId: H.ADMIN });

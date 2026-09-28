@@ -221,6 +221,46 @@ describe('antiall content protections', () => {
   });
 });
 
+describe('antiall master gate (pipeline-first)', () => {
+  // unique sender per test (antispam's tracker is module-level per sender)
+  let __mn = 0;
+  const fresh = () => `2348072${String(++__mn).padStart(5, '0')}@s.whatsapp.net`;
+
+  test('master ON deletes plain member text — by design, not a bug', async () => {
+    database.runAsBot(A, () => database.setAntiAllEnabled(H.GROUP, true));
+    setGS({ antilink: false, antiimage: false });
+    const s = H.makeSock();
+    await run(s, H.textMsg('hi, good morning', { sender: fresh() }));
+    await H.sleep(300);
+    assert.ok(s._rec.deletes.length >= 1, 'master blocks all non-admin messages');
+    database.setAntiAllEnabled(H.GROUP, false);
+  });
+
+  test('master ON deletes view-once media from members — gate runs first', async () => {
+    database.runAsBot(A, () => database.setAntiAllEnabled(H.GROUP, true));
+    setGS({ antilink: false, antiimage: false });
+    const s = H.makeSock();
+    await run(s, H.makeMsg({ viewOnceMessageV2: { message: { imageMessage: { caption: 'peek' } } } }, { sender: fresh() }));
+    await H.sleep(300);
+    assert.ok(s._rec.deletes.length >= 1, 'view-once can no longer slip past the gate');
+    database.setAntiAllEnabled(H.GROUP, false);
+  });
+
+  test('master OFF lets members chat, antilink still fires', async () => {
+    database.runAsBot(A, () => database.setAntiAllEnabled(H.GROUP, false));
+    setGS({ antilink: true, antiimage: false });
+    const s = H.makeSock();
+    await run(s, H.textMsg('just chatting, no links', { sender: fresh() }));
+    await H.sleep(250);
+    assert.equal(s._rec.deletes.length, 0, 'plain text must pass');
+
+    const s2 = H.makeSock();
+    await run(s2, H.textMsg('look https://example.com/x', { sender: fresh() }));
+    await H.sleep(300);
+    assert.ok(s2._rec.deletes.length >= 1, 'antilink still deletes');
+  });
+});
+
 describe('antidelete detector (wdp stub-type port)', () => {
   test('non-revoke updates are ignored without error', async () => {
     const s = H.makeSock();

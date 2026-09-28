@@ -795,6 +795,22 @@ const handleMessage = async (sock, msg) => {
       } catch (_muteErr) {}
     }
 
+    // ── AntiAll master gate — deliberately FIRST ──────────────────────────────
+    // Runs before every hook, reveal and dispatch so no early-return path can
+    // bypass it (view-once media could slip past when a later hook returned
+    // first). While .antiall master is on, EVERY message from a non-admin and
+    // non-owner member is deleted — ".antiall master off" keeps only the
+    // individual protections armed.
+    if (isGroup && !msg.key.fromMe && database.isAntiAllEnabled(from)) {
+      const _senderIsAdmin = await isAdmin(sock, sender, from, groupMetadata);
+      if (!_senderIsAdmin && !isOwner(sender)) {
+        if (await isBotAdmin(sock, from, groupMetadata)) {
+          await sock.sendMessage(from, { delete: msg.key });
+          return;
+        }
+      }
+    }
+
     // Group moderation hooks.
     //
     // Media/link/group-status protections are enforced inline above, so every
@@ -933,20 +949,7 @@ const handleMessage = async (sock, msg) => {
     // non-admin/non-owner members before command dispatch.
     if (isGroup) {
       const groupSettings = database.getGroupSettings(from);
-      // Never moderate messages sent by the connected WhatsApp account itself.
-      // On a linked-device bot those are the owner's green "fromMe" messages.
-      if (!msg.key.fromMe && database.isAntiAllEnabled(from)) {
-        const senderIsAdmin = await isAdmin(sock, sender, from, groupMetadata);
-        const senderIsOwner = isOwner(sender);
-
-        if (!senderIsAdmin && !senderIsOwner) {
-          const botIsAdmin = await isBotAdmin(sock, from, groupMetadata);
-          if (botIsAdmin) {
-            await sock.sendMessage(from, { delete: msg.key });
-            return;
-          }
-        }
-      }
+      // (AntiAll master gate moved to the top of the pipeline — nothing may bypass it.)
 
       // ── Content protections: antilink · antiimage · antiaudio · antisticker ·
       //    antigroupmention · antigroupstatus. Their historic hooks were removed

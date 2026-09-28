@@ -100,7 +100,7 @@ module.exports = {
       return reply(
         `✅ *AntiAll — Group Protections ENABLED*\n` +
         `━━━━━━━━━━━━━━━━━━━━\n` +
-        `  ✅ ⛔ AntiAll Master\n` +
+        `  ✅ ⛔ AntiAll Master — blocks ALL non-admin messages (.antiall master off to disable)\n` +
         GROUP_FEATURES.map(feature => `  ✅ ${feature.label}`).join('\n') + '\n' +
         `  ✅ 🛡️ Anti-Tag Admins — ${antiTagAdmins.action}\n` +
         `━━━━━━━━━━━━━━━━━━━━\n` +
@@ -121,6 +121,17 @@ module.exports = {
       );
     }
 
-    return reply('⚠️ Usage: .antiall on | off\nNo argument shows current status.');
+    if (sub === 'master') {
+      const arg = (args[1] || '').toLowerCase();
+      if (arg === 'on' || arg === 'off') {
+        database.setAntiAllEnabled(from, arg === 'on');
+        return reply(arg === 'on'
+          ? '⛔ *AntiAll Master ON* — every message from non-admins is now deleted, not just rule-breaking ones.\n_Use .antiall master off if members should chat freely._'
+          : '💬 *AntiAll Master OFF* — members can chat freely. All individual protections stay armed and still delete rule-breaking messages.');
+      }
+      return reply('⚠️ Usage: .antiall master on | off');
+    }
+
+    return reply('⚠️ Usage: .antiall on | off | master on/off\nNo argument shows current status.');
   },
 };
