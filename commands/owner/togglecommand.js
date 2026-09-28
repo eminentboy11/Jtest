@@ -5,10 +5,12 @@
  * handler.js), so you can never lock yourself out.
  */
 'use strict';
-const commandToggle = require('../../utils/commandToggle');
+// commandToggle lives inside handler.js now — resolved lazily at execute time
+// (a top-level require would race handler.js's own module loading).
+const getToggle = () => require('../../handler').commandToggle;
 
 function buildStatusLine() {
-  const list = commandToggle.getAll();
+  const list = getToggle().getAll();
   return list.length
     ? `🚫 *Disabled commands (${list.length}):*\n${list.map(c => `• ${c}`).join('\n')}`
     : '✅ No commands are disabled.';
@@ -30,7 +32,7 @@ const makeHandler = (turningOn) => async (sock, msg, args, extra) => {
     }
 
     if (turningOn && raw === 'all') {
-      const n = commandToggle.enableAll();
+      const n = getToggle().enableAll();
       return extra.reply(
         n
           ? `✅ Re-enabled *${n}* command${n === 1 ? '' : 's'}.`
@@ -45,13 +47,13 @@ const makeHandler = (turningOn) => async (sock, msg, args, extra) => {
     }
     const canonical = String(known?.name || raw).toLowerCase();
 
-    if (!turningOn && commandToggle.isProtected(canonical)) {
+    if (!turningOn && getToggle().isProtected(canonical)) {
       return extra.reply(`🛡️ *${canonical}* can't be disabled — you'd have no way to re-enable it from chat.`);
     }
 
     if (turningOn) {
-      const wasOff = commandToggle.isDisabled(canonical);
-      commandToggle.enable(canonical);
+      const wasOff = getToggle().isDisabled(canonical);
+      getToggle().enable(canonical);
       return extra.reply(
         wasOff
           ? `✅ Command *${canonical}* is now *enabled*.`
@@ -59,8 +61,8 @@ const makeHandler = (turningOn) => async (sock, msg, args, extra) => {
       );
     }
 
-    const wasOff = commandToggle.isDisabled(canonical);
-    commandToggle.disable(canonical);
+    const wasOff = getToggle().isDisabled(canonical);
+    getToggle().disable(canonical);
     return extra.reply(
       wasOff
         ? `🚫 Command *${canonical}* is already disabled.`

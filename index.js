@@ -170,11 +170,15 @@ async function bootBot(botId, opts = {}) {
         browser: Browsers.macOS("Safari"),
         syncFullHistory: false,
         generateHighQualityLinkPreview: true,
-        markOnlineOnConnect: true,
+        markOnlineOnConnect: !require('./utils/botMode').isStealth(),
         connectTimeoutMs: 60000,
         keepAliveIntervalMs: 30000,
         getMessage: async () => undefined,
     });
+
+    // Stealth merge: mute presence/read receipts on the live socket while
+    // bot mode is 'stealth' (wrappers re-check on every call — instant toggle).
+    require('./utils/botMode').applyToSocket(sock);
 
     bot.sock = sock;
     bot.auth = { state, saveCreds };

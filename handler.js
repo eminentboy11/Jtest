@@ -4,7 +4,54 @@
 
 const database = require('./database');
 const { loadCommands, watchCommands, swapInto } = require('./utils/commandLoader');
-const commandToggle = require('./utils/commandToggle');
+// ── Command Toggle — runtime disable/enable (merged in from utils/commandToggle.js) ──
+// Backed by SQLite bot_settings (key 'disabledCommands', JSON array of canonical
+// names). Enforcement lives in the two dispatch gates below; owner & sudo always
+// bypass, and 'disable'/'enable' themselves can never be turned off.
+const commandToggle = (() => {
+  const KEY = 'disabledCommands';
+  const PROTECTED = ['disable', 'enable'];
+  const readList = () => {
+    try {
+      const v = database.getBotSetting(KEY);
+      return Array.isArray(v) ? v.map((x) => String(x).toLowerCase()) : [];
+    } catch (_) { return []; }
+  };
+  const writeList = (list) => {
+    try {
+      database.setBotSetting(KEY, [...new Set(list.map((x) => String(x).toLowerCase()))]);
+      return true;
+    } catch (_) { return false; }
+  };
+  return {
+    KEY, PROTECTED,
+    getAll: () => readList().sort(),
+    isDisabled: (name) => {
+      const k = String(name || '').toLowerCase();
+      return !!k && readList().includes(k);
+    },
+    isProtected: (name) => PROTECTED.includes(String(name || '').toLowerCase()),
+    disable: (name) => {
+      const k = String(name || '').toLowerCase();
+      if (!k || PROTECTED.includes(k)) return false;
+      const list = readList();
+      if (list.includes(k)) return true;
+      return writeList([...list, k]);
+    },
+    enable: (name) => {
+      const k = String(name || '').toLowerCase();
+      if (!k) return false;
+      const list = readList();
+      if (!list.includes(k)) return true;
+      return writeList(list.filter((x) => x !== k));
+    },
+    enableAll: () => {
+      const list = readList();
+      writeList([]);
+      return list.length;
+    },
+  };
+})();
 const { addMessage, getActiveUsers, getInactiveUsers } = require('./utils/groupstats');
 const { jidDecode, jidEncode } = require('@whiskeysockets/baileys');
 
@@ -797,6 +844,7 @@ const handleMessage = async (sock, msg) => {
         isSudo: isMod(sender),
         prefix: database.getBotSetting('prefix') || '.',
         command: '',
+        commands,
         reply: (text) => sock.sendMessage(from, { text }, { quoted: msg }),
         react: (emoji) => sock.sendMessage(from, { react: { text: emoji, key: msg.key } })
       });
@@ -1112,7 +1160,13 @@ const handleMessage = async (sock, msg) => {
     // ─────────────────────────────────────────────────────────────────────────────
 
     // Themed console message box (white/Lite theme only — no-op in dark)
-    try { require('./utils/consoleTheme').printMessage(msg, content, sock, { groupName: groupMetadata?.subject || null }) } catch (_) {}
+    // Message log line (consoleTheme.js was removed — inline keeps it alive)
+    try {
+      const _who = (msg.key.participant || msg.key.remoteJid || '?').split('@')[0].split(':')[0];
+      const _txt = String(content.conversation || content.extendedTextMessage?.text || '[media/event]').split('\n')[0].slice(0, 90);
+      const _where = groupMetadata?.subject ? ` [${groupMetadata.subject}]` : '';
+      console.log(`[${new Date().toTimeString().slice(0, 8)}]${_where} ${_who}: ${_txt}`);
+    } catch (_) {}
 
     // Prefix gate — determine whether this message even looks like a command attempt.
     // When prefix is empty ('') every message is a potential command (intentional),
@@ -1248,7 +1302,7 @@ const handleMessage = async (sock, msg) => {
       const { getMode } = require('./utils/botMode');
       const botModeVal = getMode();
       // Accept both the user-facing names and the old silent/groups/dms rows.
-      if ((botModeVal === 'private' || botModeVal === 'silent') && !senderIsSudo) {
+      if ((botModeVal === 'private' || botModeVal === 'silent' || botModeVal === 'stealth') && !senderIsSudo) {
         return;
       }
       if ((botModeVal === 'group' || botModeVal === 'groups') && !isGroup && !senderIsSudo) {
@@ -1314,13 +1368,9 @@ const handleMessage = async (sock, msg) => {
       console.error('[PRESENCE] error:', presenceErr.message);
     }
 
-    // Themed command execution log (dark = classic Ultra, light = Lite style)
+    // Command execution log (consoleTheme.js was removed — inline keeps it alive)
     const senderNum = sender.split('@')[0].split(':')[0];
-    require('./utils/consoleTheme').cmdLine(
-      commandName,
-      senderNum,
-      senderIsOwner ? 'OWNER' : senderIsSudo ? 'SUDO' : 'USER'
-    );
+    console.log(`[${new Date().toTimeString().slice(0, 8)}] ⚙ ${commandName} — ${senderIsOwner ? 'OWNER' : senderIsSudo ? 'SUDO' : 'USER'} (${senderNum})`);
 
     // Remember the owner's WhatsApp display name so the startup card and the
     // menu can show a name instead of a number. Only fills an empty setting,
@@ -1343,6 +1393,7 @@ const handleMessage = async (sock, msg) => {
       isSudo: senderIsSudo,
       prefix: database.getBotSetting('prefix'),
       command: commandName,
+      commands,
       reply: (text) => sock.sendMessage(from, { text: applyFont(text) }, { quoted: msg }),
       react: (emoji) => sock.sendMessage(from, { react: { text: emoji, key: msg.key } }),
       getCommandCount: () => commands.commandCount ?? commands.size,
@@ -1375,6 +1426,7 @@ const handleMessage = async (sock, msg) => {
 module.exports = {
   handleMessage,
   closeCommandWatcher,
+  commandToggle,
   isOwner,
   isAdmin,
   isBotAdmin,

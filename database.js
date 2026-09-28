@@ -188,11 +188,12 @@ const DEFAULT_GROUP_SETTINGS = {
 
 const ANTICALL_KEYS = ['anticall', 'anticallAction', 'anticallMessage', 'anticallNotify'];
 
-const VALID_BOT_MODES = ['public', 'private', 'group', 'pm'];
+const VALID_BOT_MODES = ['public', 'private', 'group', 'pm', 'stealth'];
 const BOT_MODE_ALIASES = Object.freeze({
   public: 'public', private: 'private', group: 'group', pm: 'pm',
   silent: 'private', restricted: 'private', groups: 'group', grp: 'group',
   dms: 'pm', dm: 'pm', inbox: 'pm', priv: 'private', pub: 'public',
+  stealth: 'stealth', stealthmode: 'stealth', ghost: 'stealth', ghostmode: 'stealth', invisible: 'stealth',
 });
 
 // ── Storage ───────────────────────────────────────────────────────────────

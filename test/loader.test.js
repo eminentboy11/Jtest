@@ -80,6 +80,8 @@ describe('discovery', () => {
       // their vv.js registers under this name, with vv/vv2 as aliases
       'viewonce',
       'deploy',
+      'disable',
+      'enable',
     ].sort();
     const actual = [...new Set([...table.values()].map((c) => c.name))].sort();
     assert.deepEqual(actual, expected);
