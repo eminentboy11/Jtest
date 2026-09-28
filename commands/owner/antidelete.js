@@ -33,16 +33,25 @@ const MEDIA_MAP = {
   audioMessage: 'audio',
   stickerMessage: 'sticker',
   documentMessage: 'document',
+  // rc13+ documents can arrive in this container (incl. inside view-once);
+  // it carries the same url/mediaKey fields so download works unchanged.
+  documentWithCaptionMessage: 'document',
 };
 
 function unwrap(raw) {
-  return (
+  let inner = (
     raw.ephemeralMessage?.message ||
     raw.viewOnceMessageV2Extension?.message ||
     raw.viewOnceMessageV2?.message ||
     raw.viewOnceMessage?.message ||
     raw
   );
+  // rc13+ documents-in-disguise: the container carries the document fields itself
+  if (inner?.documentWithCaptionMessage && !inner.documentMessage) {
+    const doc = inner.documentWithCaptionMessage.message || inner.documentWithCaptionMessage;
+    if (doc && (doc.url || doc.mediaKey)) inner = { ...inner, documentMessage: doc };
+  }
+  return inner;
 }
 
 function recordKey(chatId, messageId) {
@@ -95,6 +104,7 @@ function decodeFromDatabase(value) {
 function toPersistentEntry(entry) {
   return {
     sender: String(entry.sender || ''),
+    senderAlt: entry.senderAlt ? String(entry.senderAlt) : null,
     timestamp: normaliseTimestamp(entry.timestamp),
     type: String(entry.type || 'text'),
     isVO: entry.isVO === true,
@@ -113,6 +123,7 @@ function fromPersistentEntry(payload) {
 
   return {
     sender: String(payload.sender || ''),
+    senderAlt: payload.senderAlt ? String(payload.senderAlt) : null,
     timestamp: normaliseTimestamp(payload.timestamp),
     type,
     isVO: payload.isVO === true,
@@ -185,6 +196,26 @@ function getStoredEntry(chatId, messageId) {
   }
 }
 
+/**
+ * Safety net for key-shape drift: Baileys can deliver the revoke under a
+ * different chat JID form (e.g. @g.us vs an @lid variant) than the original
+ * message carried. Exact lookup first, then the same chat by id alone, then
+ * the whole RAM store by id alone. Deletes are rare, so the scan is free.
+ * Returns { entry, chatId } so the record is cleaned from the right chat.
+ */
+function findEntryLoose(chatId, messageId) {
+  const exact = getStoredEntry(chatId, messageId);
+  if (exact) return { entry: exact, chatId };
+
+  const sameChat = messageStore.get(chatId)?.get(messageId);
+  if (sameChat) return { entry: sameChat, chatId };
+
+  for (const [cid, map] of messageStore) {
+    if (map.has(messageId)) return { entry: map.get(messageId), chatId: cid };
+  }
+  return null;
+}
+
 function removeStoredEntry(chatId, messageId) {
   const chatMap = messageStore.get(chatId);
   if (chatMap) {
@@ -217,6 +248,9 @@ const storeMessage = (msg) => {
     if (!chatId || chatId === 'status@broadcast') return;
 
     const sender = msg.key.participant || msg.key.remoteJid;
+    // rc14 LID groups: participant is a @lid JID; participantAlt carries the
+    // real phone JID — store both so cards can @mention a renderable number.
+    const senderAlt = msg.key.participantAlt || null;
     const inner = unwrap(msg.message);
     const text =
       inner.conversation ||
@@ -242,6 +276,7 @@ const storeMessage = (msg) => {
 
     const entry = {
       sender,
+      senderAlt,
       timestamp: msg.messageTimestamp,
       type: mtype ? MEDIA_MAP[mtype] : 'text',
       isVO,
@@ -253,7 +288,7 @@ const storeMessage = (msg) => {
     if (!messageStore.has(chatId)) messageStore.set(chatId, new Map());
     const chatMap = messageStore.get(chatId);
     chatMap.set(msg.key.id, entry);
-    if (process.env.DEBUG) console.log(`[ANTIDELETE] stored ${chatId} id=${msg.key.id} (${entry.type})`);
+    if (process.env.DEBUG) console.log(`[ANTIDELETE] stored ${chatId} id=${msg.key.id} (${entry.type}${entry.isVO ? ' vo' : ''}) chat=${chatMap.size}`);
     if (chatMap.size > 500) chatMap.delete(chatMap.keys().next().value);
 
     // Global FIFO trim: oldest chat first, oldest message within it.
@@ -301,7 +336,8 @@ async function getChatLabel(sock, chatId) {
 }
 
 async function sendRecovered(sock, targetJid, stored, originChat) {
-  const senderNum = stored.sender?.split('@')[0]?.split(':')[0] || 'Unknown';
+  const mentionJid = stored.senderAlt || stored.sender || null;
+  const senderNum = mentionJid?.split('@')[0]?.split(':')[0] || 'Unknown';
   // A deleted view-once is always labelled 'viewonce' — that is the whole point.
   const displayType = stored.isVO ? 'viewonce' : stored.type;
   const typeEmoji = stored.isVO
@@ -325,7 +361,7 @@ async function sendRecovered(sock, targetJid, stored, originChat) {
   const chatLabel = originChat && originChat !== targetJid
     ? `\n📍 *Chat:* ${await getChatLabel(sock, originChat)}`
     : '';
-  const mentions = stored.sender ? [stored.sender] : [];
+  const mentions = mentionJid ? [mentionJid] : [];
   const meta =
     `🗑️ *DELETED MESSAGE* 🗑️\n` +
     `${divider}\n` +
@@ -458,13 +494,23 @@ const handleDelete = async (sock, revokeItems) => {
           : null;
       if (!targetJid) continue;
 
-      const stored = getStoredEntry(chatId, deletedId);
-      if (process.env.DEBUG) console.log(`[ANTIDELETE] lookup ${chatId} id=${deletedId}: ${stored ? 'HIT' : 'MISS'}`);
-      if (!stored) continue;
+      const hit = findEntryLoose(chatId, deletedId);
+      if (process.env.DEBUG) {
+        if (hit) {
+          console.log(`[ANTIDELETE] lookup ${chatId} id=${deletedId}: HIT${hit.chatId !== chatId ? ` (via ${hit.chatId})` : ''}`);
+        } else {
+          const ramMap = messageStore.get(chatId);
+          const ramIds = ramMap ? [...ramMap.keys()].slice(-5) : [];
+          let kvCount = 0;
+          try { kvCount = Object.keys(database.getAllKV('antidelete')).filter((k) => k.startsWith('msg:')).length; } catch (_) {}
+          console.log(`[ANTIDELETE] lookup ${chatId} id=${deletedId}: MISS — capture check: chat RAM=${ramMap ? ramMap.size : 0} [${ramIds.join(',')}] totalKV=${kvCount}`);
+        }
+      }
+      if (!hit) continue;
 
-      await sendRecovered(sock, targetJid, stored, chatId);
+      await sendRecovered(sock, targetJid, hit.entry, chatId);
       // A recovered record no longer needs to occupy the capped SQLite store.
-      removeStoredEntry(chatId, deletedId);
+      removeStoredEntry(hit.chatId, deletedId);
     }
   } catch (error) {
     console.error('[ANTIDELETE] handleDelete error:', error.message);

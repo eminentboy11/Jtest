@@ -292,6 +292,72 @@ describe('antidelete view-once resurrection', () => {
     setAdMode('off');
   });
 
+  test('revoke delivered under a DIFFERENT chat jid still recovers (loose lookup)', async () => {
+    setAdMode('chat');
+    const { WAMessageStubType } = require('@whiskeysockets/baileys');
+    const s = H.makeSock();
+
+    const secret = 'chatdrift-' + Date.now();
+    const m = H.textMsg(secret, { sender: H.MEMBER, id: 'DRIFTID1' });
+    await run(s, m);
+    await H.sleep(200);
+
+    // revoke names the same id but under an @lid variant of the chat jid
+    await del(s, [{
+      key: { remoteJid: '120363431393468664@lid', id: 'DRIFTID1', fromMe: false, participant: H.MEMBER },
+      update: { messageStubType: WAMessageStubType.REVOKE },
+    }]);
+    await H.sleep(350);
+    assert.ok(s._rec.texts.some((t) => t.includes(secret)), 'loose lookup must find the id despite chat-jid drift');
+    setAdMode('off');
+  });
+
+  test('view-once DOCUMENT is captured (documentWithCaptionMessage) and recovered', async () => {
+    setAdMode('chat');
+    const { WAMessageStubType } = require('@whiskeysockets/baileys');
+    const s = H.makeSock();
+
+    await run(s, H.makeMsg(
+      { viewOnceMessageV2: { message: { documentWithCaptionMessage: { url: 'https://cdn/x', mediaKey: null, fileName: 'secret.pdf', mimetype: 'application/pdf' } } } },
+      { sender: H.MEMBER, id: 'VODOC1' },
+    ));
+    await H.sleep(200);
+
+    await del(s, [{
+      key: { remoteJid: H.GROUP, id: 'VODOC1', fromMe: false, participant: H.MEMBER },
+      update: { messageStubType: WAMessageStubType.REVOKE },
+    }]);
+    await H.sleep(400);
+    const docSend = s._rec.sent.find((x) => x.content?.document);
+    assert.ok(docSend, 'view-once document must be re-sent');
+    assert.equal(docSend.content.fileName, 'secret.pdf');
+    assert.ok(docSend.content.caption?.includes('viewonce'), 'VO document card labels it viewonce');
+    setAdMode('off');
+  });
+
+  test('card mentions the participantAlt phone JID on LID senders', async () => {
+    setAdMode('chat');
+    const { WAMessageStubType } = require('@whiskeysockets/baileys');
+    const s = H.makeSock();
+
+    const secret = 'lidalt-' + Date.now();
+    const m = H.textMsg(secret, { sender: H.MEMBER, id: 'LIDALT1' });
+    m.key.participant = '23256100331525@lid';
+    m.key.participantAlt = '2348072642047@s.whatsapp.net';
+    await run(s, m);
+    await H.sleep(200);
+
+    await del(s, [{
+      key: { remoteJid: H.GROUP, id: 'LIDALT1', fromMe: false, participant: '23256100331525@lid' },
+      update: { messageStubType: WAMessageStubType.REVOKE },
+    }]);
+    await H.sleep(350);
+    const card = s._rec.texts.find((t) => t.includes('DELETED MESSAGE'));
+    assert.ok(card, 'card must be sent');
+    assert.ok(card.includes('@2348072642047'), 'mention must use the phone-number JID, not the raw LID');
+    setAdMode('off');
+  });
+
   test('non-VO media keeps the classic fused-caption recovery', async () => {
     setAdMode('chat');
     const { WAMessageStubType } = require('@whiskeysockets/baileys');
