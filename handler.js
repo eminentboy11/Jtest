@@ -1462,18 +1462,31 @@ const handleMessage = async (sock, msg) => {
 };
 
 // ── messages.update: revoked (deleted) messages → antidelete recovery ───────
-// index.js forwards every update batch here; only REVOKE protocol messages are
-// acted on, routed to the antidelete command's handleDelete (modes: chat/private).
+// Ported from ..wdp handler.js — the proven production detector. Baileys
+// delivers deletions as messageStubType REVOKE updates (the protocolMessage
+// inside is consumed by Baileys, so stubbing on it alone misses most events);
+// a protocolMessage fallback stays for safety. Also forwards status deletions
+// to antideletestatus, matching wdp.
 const handleMessagesUpdate = async (sock, updates) => {
   try {
     if (!Array.isArray(updates) || !updates.length) return;
-    const revokes = [];
+    const { WAMessageStubType } = require('@whiskeysockets/baileys');
+
+    const revokeUpdates = updates.filter(
+      (item) => item.update?.messageStubType === WAMessageStubType.REVOKE
+    );
+
+    // Fallback shape: some Baileys builds surface protocolMessage REVOKE
+    // directly without the stub. Normalize to the same { key } shape
+    // handleDelete expects.
+    const protoUpdates = [];
     for (const u of updates) {
+      if (revokeUpdates.includes(u)) continue;
       const proto = u?.update?.message?.protocolMessage;
       if (!proto || !proto.key) continue;
       const t = proto.type;
-      if (t !== 0 && t !== 'REVOKE') continue; // 0 = REVOKE in the WA proto
-      revokes.push({
+      if (t !== 0 && t !== 'REVOKE') continue;
+      protoUpdates.push({
         key: {
           remoteJid: proto.key.remoteJid || u.key?.remoteJid,
           id: proto.key.id,
@@ -1482,44 +1495,55 @@ const handleMessagesUpdate = async (sock, updates) => {
         },
       });
     }
-    if (!revokes.length) return;
-    const antidelete = commands.get('antidelete');
-    if (antidelete?.handleDelete) await antidelete.handleDelete(sock, revokes);
+
+    if (revokeUpdates.length) {
+      const antidelete = commands.get('antidelete');
+      if (antidelete?.handleDelete) await antidelete.handleDelete(sock, revokeUpdates);
+
+      const antideletestatus = commands.get('antideletestatus');
+      if (antideletestatus?.handleStatusDelete) await antideletestatus.handleStatusDelete(sock, revokeUpdates);
+    }
+    if (protoUpdates.length) {
+      const antidelete = commands.get('antidelete');
+      if (antidelete?.handleDelete) await antidelete.handleDelete(sock, protoUpdates);
+    }
   } catch (_) {}
 };
 
-// ── group-participants.update: anti-demote / anti-promote ───────────────────
-// Reverts admin changes made by anyone except the bot itself and the owner.
+// ── group-participants.update: anti-demote / anti-promote (wdp port) ───────
+// Routes promote/demote events to the antidemote/antipromote commands'
+// handleDemote/handlePromote (revert/kick/demote action modes, echo-guarded).
 const handleParticipantsUpdate = async (sock, update) => {
   try {
-    const groupId = update?.id;
-    if (!groupId || !String(groupId).endsWith('@g.us')) return;
-    const action = update.action;
-    if (action !== 'promote' && action !== 'demote') return;
-    const gs = database.getGroupSettings(groupId);
-    if (action === 'demote' ? !gs.antidemote : !gs.antipromote) return;
+    const { id, participants, action, author: actor } = update;
+    if (!id || !String(id).endsWith('@g.us')) return;
 
-    // The bot's own and the owner's admin changes are intentional — never revert.
-    const strip = (j) => String(j || '').split('@')[0].split(':')[0].replace(/\D/g, '');
-    const actorNum = strip(update.author);
-    if (!actorNum) return;
-    if (actorNum === strip(sock?.user?.id)) return;
-    const owners = database.getOwners().map(strip);
-    if (owners.includes(actorNum)) return;
+    // Admin reality changed — drop the stale bot-admin verdict immediately.
+    try { invalidateBotAdmin(id); } catch (_) {}
 
-    if (!(await isBotAdmin(sock, groupId, null))) return;
+    if (action === 'demote' || action === 'promote') {
+      // Resolve actor — could be a lid JID; normalize to phone JID
+      let resolvedActor = actor || null;
+      if (resolvedActor) {
+        try { resolvedActor = require('./utils/jidHelper').normalizeJidWithLid(resolvedActor) || resolvedActor; } catch (_) {}
+      }
 
-    const targets = (update.participants || []).filter(Boolean);
-    if (!targets.length) return;
-    const revert = action === 'demote' ? 'promote' : 'demote';
-    await sock.groupParticipantsUpdate(groupId, targets, revert);
-    await sock.sendMessage(groupId, {
-      text: (action === 'demote'
-        ? '⬇️ Anti-Demote — restored admin for '
-        : '⬆️ Anti-Promote — reverted admin for ') +
-        targets.map((t) => '@' + String(t).split('@')[0]).join(' '),
-      mentions: targets,
-    });
+      for (const participant of participants || []) {
+        // Participants may be plain string JIDs or objects with phoneNumber/pn
+        const pJid = typeof participant === 'string'
+          ? participant
+          : (participant?.phoneNumber || participant?.pn || participant?.id || participant?.jid || null);
+        if (!pJid) continue;
+
+        if (action === 'demote') {
+          const cmd = commands.get('antidemote');
+          if (cmd?.handleDemote) await cmd.handleDemote(sock, id, resolvedActor, pJid);
+        } else {
+          const cmd = commands.get('antipromote');
+          if (cmd?.handlePromote) await cmd.handlePromote(sock, id, resolvedActor, pJid);
+        }
+      }
+    }
   } catch (_) {}
 };
 

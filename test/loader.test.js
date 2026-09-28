@@ -72,6 +72,7 @@ describe('discovery', () => {
     const expected = [
       'ping', 'uptime',
       'antispam', 'antiviewonce', 'antibot', 'antiforward', 'antitagadmins', 'antidelete',
+      'antideletestatus', 'antidemote', 'antipromote',
       'menu', 'help', 'sticker', 'save', 'chatbot', 'mygroups',
       'ttt2', 'tod', 'snake',
       // the owner's own additions

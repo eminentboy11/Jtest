@@ -62,7 +62,7 @@ const taggingAdmin = () => H.makeMsg({
 
 describe('registration', () => {
   test('all five commands load alongside ping and uptime', () => {
-    assert.equal(handler.getCommandCount(), 33);  // the shipped set, see loader.test.js
+    assert.equal(handler.getCommandCount(), 36);  // the shipped set, see loader.test.js
   });
 
   test('each exposes the hook handler.js calls', () => {
@@ -221,7 +221,7 @@ describe('antiall content protections', () => {
   });
 });
 
-describe('antidelete detector', () => {
+describe('antidelete detector (wdp stub-type port)', () => {
   test('non-revoke updates are ignored without error', async () => {
     const s = H.makeSock();
     await handler.handleMessagesUpdate(s, [
@@ -229,25 +229,64 @@ describe('antidelete detector', () => {
     ]);
   });
 
-  test('a revoked message that was stored is recovered into the chat', async () => {
+  test('a WAMessageStubType.REVOKE update recovers the stored message', async () => {
     database.setAntideleteMode('chat');
+    const { WAMessageStubType } = require('@whiskeysockets/baileys');
     const s = H.makeSock();
-    const secret = 'recover-me-' + Date.now();
-    await run(s, H.textMsg(secret, { sender: H.MEMBER, id: 'RECOVER1' }));
+    const secret = 'stub-recover-' + Date.now();
+    await run(s, H.textMsg(secret, { sender: H.MEMBER, id: 'STUBSTORE1' }));
     await H.sleep(200);
     await handler.handleMessagesUpdate(s, [{
-      key: { remoteJid: H.GROUP, id: 'R1', participant: H.MEMBER },
-      update: { message: { protocolMessage: { type: 0, key: { remoteJid: H.GROUP, id: 'RECOVER1', participant: H.MEMBER, fromMe: false } } } },
+      // Real Baileys REVOKE shape: the REVOKED message's key rides at item.key
+      key: { remoteJid: H.GROUP, id: 'STUBSTORE1', fromMe: false, participant: H.MEMBER },
+      update: { messageStubType: WAMessageStubType.REVOKE },
     }]);
-    await H.sleep(300);
+    await H.sleep(350);
     assert.ok(s._rec.texts.some((t) => t.includes(secret)), 'the original text must be re-sent');
     database.setAntideleteMode('off');
   });
 
-  test('handleParticipantsUpdate ignores non-admin actions', async () => {
+  test('protocolMessage fallback still works', async () => {
+    database.setAntideleteMode('chat');
     const s = H.makeSock();
-    await handler.handleParticipantsUpdate(s, { id: H.GROUP, action: 'add', participants: [H.MEMBER], author: H.ADMIN });
+    const secret = 'proto-recover-' + Date.now();
+    await run(s, H.textMsg(secret, { sender: H.MEMBER, id: 'PROTOSTORE1' }));
+    await H.sleep(200);
+    await handler.handleMessagesUpdate(s, [{
+      key: { remoteJid: H.GROUP, id: 'P9', participant: H.MEMBER },
+      update: { message: { protocolMessage: { type: 0, key: { remoteJid: H.GROUP, id: 'PROTOSTORE1', participant: H.MEMBER, fromMe: false } } } },
+    }]);
+    await H.sleep(350);
+    assert.ok(s._rec.texts.some((t) => t.includes(secret)), 'the original text must be re-sent');
+    database.setAntideleteMode('off');
+  });
+});
+
+describe('antidemote / antipromote (wdp port)', () => {
+  test('demote event with antidemote=revert re-promotes the victim', async () => {
+    setGS({ antidemote: true, antidemoteAction: 'revert' });
+    const s = H.makeSock();
+    // The demoter must not be the bot itself or the owner; the call must run
+    // inside the same bot context the settings were written to.
+    await database.runAsBot(A, () => handler.handleParticipantsUpdate(s, {
+      id: H.GROUP, action: 'demote', participants: [H.MEMBER], author: H.ADMIN,
+    }));
+    await H.sleep(350);
+    const promote = s._rec.kicks.find((k) => k.action === 'promote');
+    assert.ok(promote, 'the bot must re-promote the demoted admin');
+    assert.ok(promote.participants.includes(H.MEMBER));
+    assert.ok(s._rec.texts.some((t) => /AntiDemote/i.test(t)), 'a security alert must be posted');
+  });
+
+  test('does nothing when antidemote is off', async () => {
+    setGS({ antidemote: false });
+    const s = H.makeSock();
+    await database.runAsBot(A, () => handler.handleParticipantsUpdate(s, {
+      id: H.GROUP, action: 'demote', participants: [H.MEMBER], author: H.ADMIN,
+    }));
+    await H.sleep(250);
     assert.equal(s._rec.kicks.length, 0);
+    assert.equal(s._rec.texts.length, 0);
   });
 });
 
