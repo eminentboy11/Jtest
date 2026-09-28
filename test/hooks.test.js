@@ -167,6 +167,90 @@ describe('antispam', () => {
   });
 });
 
+describe('antiall content protections', () => {
+  before(() => setGS({ antilink: true, antiimage: true, antiaudio: true, antisticker: true }));
+
+  // A unique sender per test: antispam is left ON by the suite above (limit 3),
+  // and its tracker is module-level per (group, sender) — shared senders would
+  // trip it mid-describe.
+  let __n = 0;
+  const fresh = () => `2348071${String(++__n).padStart(5, '0')}@s.whatsapp.net`;
+
+  test('antilink deletes a member link and posts a notice', async () => {
+    const s = H.makeSock();
+    await run(s, H.textMsg('check https://www.facebook.com/share today', { sender: fresh() }));
+    await H.sleep(300);
+    assert.ok(s._rec.deletes.length >= 1, 'the link message must be deleted');
+    assert.ok(s._rec.texts.some((t) => /Anti-Link/i.test(t)), 'a notice must be posted');
+  });
+
+  test('plain text from the same member passes untouched', async () => {
+    const s = H.makeSock();
+    await run(s, H.textMsg('just words, nothing more', { sender: fresh() }));
+    await H.sleep(250);
+    assert.equal(s._rec.deletes.length, 0);
+  });
+
+  test('admins are immune', async () => {
+    const s = H.makeSock();
+    await run(s, H.textMsg('https://github.com/anything', { sender: H.ADMIN }));
+    await H.sleep(250);
+    assert.equal(s._rec.deletes.length, 0);
+  });
+
+  test('antiimage deletes a member photo', async () => {
+    const s = H.makeSock();
+    await run(s, H.makeMsg({ imageMessage: { caption: 'photo' } }, { sender: fresh() }));
+    await H.sleep(300);
+    assert.ok(s._rec.deletes.length >= 1, 'the image must be deleted');
+    assert.ok(s._rec.texts.some((t) => /Anti-Image/i.test(t)));
+  });
+
+  test('antiaudio deletes a member voice note', async () => {
+    const s = H.makeSock();
+    await run(s, H.makeMsg({ audioMessage: { ptt: true, mimetype: 'audio/ogg' } }, { sender: fresh() }));
+    await H.sleep(300);
+    assert.ok(s._rec.deletes.length >= 1, 'the voice note must be deleted');
+  });
+
+  test('antisticker deletes a member sticker', async () => {
+    const s = H.makeSock();
+    await run(s, H.makeMsg({ stickerMessage: { mimetype: 'image/webp' } }, { sender: fresh() }));
+    await H.sleep(300);
+    assert.ok(s._rec.deletes.length >= 1, 'the sticker must be deleted');
+  });
+});
+
+describe('antidelete detector', () => {
+  test('non-revoke updates are ignored without error', async () => {
+    const s = H.makeSock();
+    await handler.handleMessagesUpdate(s, [
+      { key: { remoteJid: H.GROUP, id: 'X1', participant: H.MEMBER }, update: { status: 3 } },
+    ]);
+  });
+
+  test('a revoked message that was stored is recovered into the chat', async () => {
+    database.setAntideleteMode('chat');
+    const s = H.makeSock();
+    const secret = 'recover-me-' + Date.now();
+    await run(s, H.textMsg(secret, { sender: H.MEMBER, id: 'RECOVER1' }));
+    await H.sleep(200);
+    await handler.handleMessagesUpdate(s, [{
+      key: { remoteJid: H.GROUP, id: 'R1', participant: H.MEMBER },
+      update: { message: { protocolMessage: { type: 0, key: { remoteJid: H.GROUP, id: 'RECOVER1', participant: H.MEMBER, fromMe: false } } } },
+    }]);
+    await H.sleep(300);
+    assert.ok(s._rec.texts.some((t) => t.includes(secret)), 'the original text must be re-sent');
+    database.setAntideleteMode('off');
+  });
+
+  test('handleParticipantsUpdate ignores non-admin actions', async () => {
+    const s = H.makeSock();
+    await handler.handleParticipantsUpdate(s, { id: H.GROUP, action: 'add', participants: [H.MEMBER], author: H.ADMIN });
+    assert.equal(s._rec.kicks.length, 0);
+  });
+});
+
 describe('antiviewonce', () => {
   before(() => setGS({ antiviewonce: true }));
 

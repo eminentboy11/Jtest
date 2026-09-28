@@ -343,11 +343,18 @@ async function bootBot(botId, opts = {}) {
         }
     });
 
+    // Deleted-message detection → anti-delete recovery (.antidelete chat/private)
+    sock.ev.on('messages.update', async (updates) => {
+        try { await require('./handler').handleMessagesUpdate(sock, updates); } catch {}
+    });
+
     // Promote/demote/kick events change admin reality — drop the stale
     // bot-admin verdict for that group immediately (was cached for 2 min,
-    // which made freshly promoted bots keep saying "bot needs to be admin").
-    sock.ev.on('group-participants.update', ({ id }) => {
-        try { require('./handler').invalidateBotAdmin(id); } catch {}
+    // which made freshly promoted bots keep saying "bot needs to be admin"),
+    // and give anti-demote/anti-promote their enforcement hook.
+    sock.ev.on('group-participants.update', (update) => {
+        try { require('./handler').invalidateBotAdmin(update.id); } catch {}
+        try { require('./handler').handleParticipantsUpdate(sock, update); } catch {}
     });
 
     if (bot.mode === 'code' && bot.phone) {

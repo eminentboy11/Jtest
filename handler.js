@@ -797,12 +797,8 @@ const handleMessage = async (sock, msg) => {
 
     // Group moderation hooks.
     //
-    // The built-in anti-* checks (antilink, antibadword, antigroupmention,
-    // antigroupstatus, antiMedia, antibug, anticall) were removed along with
-    // the commands that configured them — they were dormant, since every group
-    // setting they read defaults to false. What remains is command-provided, so
-    // dropping the matching file back into commands/ re-enables the check with
-    // no edit to this handler.
+    // Media/link/group-status protections are enforced inline above, so every
+    // .antiall switch is real. The command-provided hooks below cover the rest.
     if (isGroup) {
       const antispam      = commands.get('antispam');
       const antiviewonce  = commands.get('antiviewonce');
@@ -948,6 +944,48 @@ const handleMessage = async (sock, msg) => {
           if (botIsAdmin) {
             await sock.sendMessage(from, { delete: msg.key });
             return;
+          }
+        }
+      }
+
+      // ── Content protections: antilink · antiimage · antiaudio · antisticker ·
+      //    antigroupmention · antigroupstatus. Their historic hooks were removed
+      //    with the old commands, which left .antiall toggling dead switches —
+      //    enforcement lives here now so every AntiAll feature actually fires.
+      if (!msg.key.fromMe) {
+        let violation = null;
+        if (groupSettings.antilink &&
+            /(?:https?:\/\/|www\.)\S+|chat\.whatsapp\.com\/\S+|t\.me\/\S+/i.test(body || '')) {
+          violation = '🔗 Anti-Link';
+        } else if (groupSettings.antisticker && content.stickerMessage) {
+          violation = '🎭 Anti-Sticker';
+        } else if (groupSettings.antiimage && content.imageMessage) {
+          violation = '🖼️ Anti-Image';
+        } else if (groupSettings.antiaudio && content.audioMessage) {
+          violation = '🔇 Anti-Audio';
+        } else if (groupSettings.antigroupmention &&
+            (content.groupMentionedMessage || content.statusMentionMessage ||
+             (content.extendedTextMessage?.contextInfo?.mentionedJid || []).some((j) => String(j).endsWith('@g.us')))) {
+          violation = '📌 Anti-Group Mention';
+        } else if (groupSettings.antigroupstatus &&
+            (content.groupStatusMentionMessage || content.protocolMessage?.type === 3 ||
+             content.protocolMessage?.type === 'STATUS_MENTION')) {
+          violation = '🛡️ Anti-Group Status';
+        }
+
+        if (violation) {
+          const __senderIsAdmin = await isAdmin(sock, sender, from, groupMetadata);
+          if (!__senderIsAdmin && !isOwner(sender)) {
+            if (await isBotAdmin(sock, from, groupMetadata)) {
+              try {
+                await sock.sendMessage(from, { delete: msg.key });
+                await sock.sendMessage(from, {
+                  text: `${violation} — message removed from @${sender.split('@')[0].split(':')[0]}`,
+                  mentions: [sender],
+                });
+              } catch (_) {}
+              return;
+            }
           }
         }
       }
@@ -1423,8 +1461,72 @@ const handleMessage = async (sock, msg) => {
   }
 };
 
+// ── messages.update: revoked (deleted) messages → antidelete recovery ───────
+// index.js forwards every update batch here; only REVOKE protocol messages are
+// acted on, routed to the antidelete command's handleDelete (modes: chat/private).
+const handleMessagesUpdate = async (sock, updates) => {
+  try {
+    if (!Array.isArray(updates) || !updates.length) return;
+    const revokes = [];
+    for (const u of updates) {
+      const proto = u?.update?.message?.protocolMessage;
+      if (!proto || !proto.key) continue;
+      const t = proto.type;
+      if (t !== 0 && t !== 'REVOKE') continue; // 0 = REVOKE in the WA proto
+      revokes.push({
+        key: {
+          remoteJid: proto.key.remoteJid || u.key?.remoteJid,
+          id: proto.key.id,
+          participant: proto.key.participant || u.key?.participant,
+          fromMe: !!proto.key.fromMe,
+        },
+      });
+    }
+    if (!revokes.length) return;
+    const antidelete = commands.get('antidelete');
+    if (antidelete?.handleDelete) await antidelete.handleDelete(sock, revokes);
+  } catch (_) {}
+};
+
+// ── group-participants.update: anti-demote / anti-promote ───────────────────
+// Reverts admin changes made by anyone except the bot itself and the owner.
+const handleParticipantsUpdate = async (sock, update) => {
+  try {
+    const groupId = update?.id;
+    if (!groupId || !String(groupId).endsWith('@g.us')) return;
+    const action = update.action;
+    if (action !== 'promote' && action !== 'demote') return;
+    const gs = database.getGroupSettings(groupId);
+    if (action === 'demote' ? !gs.antidemote : !gs.antipromote) return;
+
+    // The bot's own and the owner's admin changes are intentional — never revert.
+    const strip = (j) => String(j || '').split('@')[0].split(':')[0].replace(/\D/g, '');
+    const actorNum = strip(update.author);
+    if (!actorNum) return;
+    if (actorNum === strip(sock?.user?.id)) return;
+    const owners = database.getOwners().map(strip);
+    if (owners.includes(actorNum)) return;
+
+    if (!(await isBotAdmin(sock, groupId, null))) return;
+
+    const targets = (update.participants || []).filter(Boolean);
+    if (!targets.length) return;
+    const revert = action === 'demote' ? 'promote' : 'demote';
+    await sock.groupParticipantsUpdate(groupId, targets, revert);
+    await sock.sendMessage(groupId, {
+      text: (action === 'demote'
+        ? '⬇️ Anti-Demote — restored admin for '
+        : '⬆️ Anti-Promote — reverted admin for ') +
+        targets.map((t) => '@' + String(t).split('@')[0]).join(' '),
+      mentions: targets,
+    });
+  } catch (_) {}
+};
+
 module.exports = {
   handleMessage,
+  handleMessagesUpdate,
+  handleParticipantsUpdate,
   closeCommandWatcher,
   commandToggle,
   isOwner,
