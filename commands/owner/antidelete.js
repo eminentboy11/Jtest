@@ -227,6 +227,7 @@ const storeMessage = (msg) => {
     if (!messageStore.has(chatId)) messageStore.set(chatId, new Map());
     const chatMap = messageStore.get(chatId);
     chatMap.set(msg.key.id, entry);
+    if (process.env.DEBUG) console.log(`[ANTIDELETE] stored ${chatId} id=${msg.key.id} (${entry.type})`);
     if (chatMap.size > 500) chatMap.delete(chatMap.keys().next().value);
 
     // SQLite is the persistent record path; the memory Map remains only the
@@ -379,6 +380,7 @@ const handleDelete = async (sock, revokeItems) => {
       if (!targetJid) continue;
 
       const stored = getStoredEntry(chatId, deletedId);
+      if (process.env.DEBUG) console.log(`[ANTIDELETE] lookup ${chatId} id=${deletedId}: ${stored ? 'HIT' : 'MISS'}`);
       if (!stored) continue;
 
       await sendRecovered(sock, targetJid, stored, chatId);

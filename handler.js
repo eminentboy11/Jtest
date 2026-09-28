@@ -1496,20 +1496,26 @@ const handleMessagesUpdate = async (sock, updates) => {
     for (const u of updates) {
       const stub = u?.update?.messageStubType;
       const proto = u?.update?.message?.protocolMessage;
+      const isRevoke = stub === WAMessageStubType?.REVOKE || stub === 1 ||
+        (proto && (proto.type === 0 || proto.type === 'REVOKE') && proto.key);
+      if (!isRevoke) continue;
 
-      let src = null;
-      if (stub === WAMessageStubType?.REVOKE || stub === 1) src = u.update.key || u.key;
-      else if (proto && (proto.type === 0 || proto.type === 'REVOKE') && proto.key) src = proto.key;
-      if (!src || !src.id) continue;
-
-      revokes.push({
-        key: {
-          remoteJid: src.remoteJid || u.key?.remoteJid,
-          id: src.id,
-          participant: src.participant ?? u.key?.participant,
-          fromMe: !!(src.fromMe ?? u.key?.fromMe),
-        },
-      });
+      // The revoked id can ride in the OUTER key (wdp's proven source) or in
+      // update.key / proto.key depending on Baileys build — emit every
+      // distinct candidate; the store lookup just misses on the wrong one.
+      const seen = new Set();
+      for (const src of [u.key, u.update && u.update.key, proto && proto.key]) {
+        if (!src || !src.id || seen.has(src.id)) continue;
+        seen.add(src.id);
+        revokes.push({
+          key: {
+            remoteJid: src.remoteJid || u.key?.remoteJid,
+            id: src.id,
+            participant: src.participant ?? u.key?.participant,
+            fromMe: !!(src.fromMe ?? u.key?.fromMe),
+          },
+        });
+      }
     }
 
     if (process.env.DEBUG) {

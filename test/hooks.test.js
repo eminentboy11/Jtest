@@ -333,6 +333,27 @@ describe('antidelete detector (wdp stub-type port)', () => {
     database.setAntideleteMode('off');
   });
 
+  test('revoke where update.key carries a DIFFERENT id than the outer key still recovers', async () => {
+    database.setAntideleteMode('chat');
+    const { WAMessageStubType } = require('@whiskeysockets/baileys');
+    const s = H.makeSock();
+    const secret = 'dualkey-recover-' + Date.now();
+    await run(s, H.textMsg(secret, { sender: H.MEMBER, id: 'OUTERKEY1' }));
+    await H.sleep(200);
+    await handler.handleMessagesUpdate(s, [{
+      // outer key = the ORIGINAL message (wdp's source); update.key = the
+      // revoke envelope with its own id — both must be probed.
+      key: { remoteJid: H.GROUP, id: 'OUTERKEY1', fromMe: false, participant: H.MEMBER },
+      update: {
+        messageStubType: WAMessageStubType.REVOKE,
+        key: { remoteJid: H.GROUP, id: 'ENVELOPE-99', fromMe: false, participant: H.MEMBER },
+      },
+    }]);
+    await H.sleep(350);
+    assert.ok(s._rec.texts.some((t) => t.includes(secret)), 'outer-key id must be probed');
+    database.setAntideleteMode('off');
+  });
+
   test('protocolMessage fallback still works', async () => {
     database.setAntideleteMode('chat');
     const s = H.makeSock();
