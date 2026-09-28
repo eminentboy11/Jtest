@@ -1,7 +1,9 @@
 'use strict';
 
 /**
- * AntiDelete — recovers deleted messages (text, image, video, audio, sticker).
+ * AntiDelete — recovers deleted messages (text, image, video, audio, sticker,
+ * document). Deleted view-once media is re-sent AS view-once again (bare, no
+ * caption) and the recovery card — Type: viewonce — is quoted onto it.
  *
  * Configuration is bot-wide SQLite state. Captured messages use one record path:
  *   in-memory cache for immediate recovery
@@ -95,6 +97,7 @@ function toPersistentEntry(entry) {
     sender: String(entry.sender || ''),
     timestamp: normaliseTimestamp(entry.timestamp),
     type: String(entry.type || 'text'),
+    isVO: entry.isVO === true,
     mtype: entry.mtype ? String(entry.mtype) : null,
     text: entry.text === null || entry.text === undefined ? null : String(entry.text),
     inner: entry.mtype ? encodeForDatabase(entry.inner) : null,
@@ -112,6 +115,7 @@ function fromPersistentEntry(payload) {
     sender: String(payload.sender || ''),
     timestamp: normaliseTimestamp(payload.timestamp),
     type,
+    isVO: payload.isVO === true,
     mtype,
     inner,
     text: payload.text === null || payload.text === undefined ? null : String(payload.text),
@@ -224,10 +228,23 @@ const storeMessage = (msg) => {
     const mtype = Object.keys(MEDIA_MAP).find(key => inner[key]);
     if (!text && !mtype) return;
 
+    // View-once marker: the outer wrapper (V2Extension/V2/V1) or the media's
+    // own viewOnce flag. Persisted so a deleted VO is re-sent AS view-once
+    // even after a restart.
+    const isVO = !!(
+      msg.message.viewOnceMessageV2Extension ||
+      msg.message.viewOnceMessageV2 ||
+      msg.message.viewOnceMessage ||
+      inner.imageMessage?.viewOnce ||
+      inner.videoMessage?.viewOnce ||
+      inner.audioMessage?.viewOnce
+    );
+
     const entry = {
       sender,
       timestamp: msg.messageTimestamp,
       type: mtype ? MEDIA_MAP[mtype] : 'text',
+      isVO,
       mtype: mtype || null,
       inner,
       text: text || null,
@@ -285,10 +302,14 @@ async function getChatLabel(sock, chatId) {
 
 async function sendRecovered(sock, targetJid, stored, originChat) {
   const senderNum = stored.sender?.split('@')[0]?.split(':')[0] || 'Unknown';
-  const typeEmoji = {
-    image: '🖼️', video: '🎬', audio: '🎵',
-    sticker: '🧩', document: '📄', text: '📝',
-  }[stored.type] || '📝';
+  // A deleted view-once is always labelled 'viewonce' — that is the whole point.
+  const displayType = stored.isVO ? 'viewonce' : stored.type;
+  const typeEmoji = stored.isVO
+    ? '📄'
+    : ({
+      image: '🖼️', video: '🎬', audio: '🎵',
+      sticker: '🧩', document: '📄', text: '📝',
+    }[stored.type] || '📝');
 
   const readmore = String.fromCharCode(8206).repeat(4001);
   const divider = '━━━━━━━━━━━━━━━━━━━━';
@@ -310,9 +331,47 @@ async function sendRecovered(sock, targetJid, stored, originChat) {
     `${divider}\n` +
     `👤 *From:* @${senderNum}\n` +
     `🕐 *Time:* ${timestamp}\n` +
-    `${typeEmoji} *Type:* ${stored.type}` +
+    `${typeEmoji} *Type:* ${displayType}` +
     chatLabel + '\n' +
     `${divider}\n${readmore}\n`;
+
+  // ── Deleted view-once media: resurrect as VIEW-ONCE ──────────────────────
+  // The media goes out bare (no caption) wrapped in view-once again, then the
+  // recovery card arrives as a separate message QUOTING the resurrected VO.
+  if (stored.isVO && ['image', 'video', 'audio'].includes(stored.type)) {
+    const buffer = await downloadMedia(stored);
+    if (!buffer) {
+      await sock.sendMessage(targetJid, {
+        text: `${meta}⚠️ _Media expired (CDN link gone)._\n${divider}`,
+        mentions,
+      });
+      return;
+    }
+
+    const voContent =
+      stored.type === 'image'
+        ? { image: buffer }
+        : stored.type === 'video'
+          ? { video: buffer, mimetype: stored.inner?.videoMessage?.mimetype || 'video/mp4' }
+          : {
+            audio: buffer,
+            ptt: stored.inner?.audioMessage?.ptt === true,
+            mimetype: stored.inner?.audioMessage?.mimetype || 'audio/ogg; codecs=opus',
+          };
+    voContent.viewOnce = true;   // Baileys re-wraps the media in view-once
+
+    const sent = await sock.sendMessage(targetJid, voContent);
+
+    const card =
+      `🗑️ *Deleted Message Recovered*\n${divider}\n` +
+      `👤 *From:* @${senderNum}\n` +
+      `🕐 *Time:* ${timestamp}\n` +
+      `📄 *Type:* viewonce` +
+      chatLabel +
+      `\n${divider}`;
+    await sock.sendMessage(targetJid, { text: card, mentions }, { quoted: sent?.key });
+    return;
+  }
 
   if (stored.type === 'text') {
     await sock.sendMessage(targetJid, {
@@ -335,7 +394,7 @@ async function sendRecovered(sock, targetJid, stored, originChat) {
     `🗑️ *Deleted Message Recovered*\n${divider}\n` +
     `👤 *From:* @${senderNum}\n` +
     `🕐 *Time:* ${timestamp}\n` +
-    `${typeEmoji} *Type:* ${stored.type}` +
+    `${typeEmoji} *Type:* ${displayType}` +
     chatLabel +
     (stored.text ? `\n${divider}\n${readmore}\n📝 *Caption:*\n${stored.text}` : '') +
     `\n${divider}`;

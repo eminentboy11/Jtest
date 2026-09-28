@@ -100,8 +100,8 @@ function makeSock(over = {}) {
   const sock = {
     user: { id: over.selfId || BOT, name: over.selfName || 'TestBot' },
     _rec: rec,
-    sendMessage: async (jid, content) => {
-      rec.sent.push({ jid, content });
+    sendMessage: async (jid, content, opts) => {
+      rec.sent.push({ jid, content, opts: opts || null });
       if (content?.delete) rec.deletes.push(content.delete);
       if (content?.react) rec.reacts.push(content.react.text);
       if (typeof content?.text === 'string') rec.texts.push(content.text);

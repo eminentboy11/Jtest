@@ -47,6 +47,9 @@ const setGS = (patch) => database.runAsBot(A, () => database.updateGroupSettings
 const getGS = (botId = A) => database.runAsBot(botId, () => database.getGroupSettings(H.GROUP));
 const run = (sock, m, botId = A) => H.dispatch(database, handler, botId, sock, m);
 const setAdMode = (m) => database.runAsBot(A, () => database.setAntideleteMode(m));
+/** index.js wraps the messages.update listener in runAsBot(bot.id) — mirror that
+ *  here, or the detector reads the default bot's (off) mode and bails. */
+const del = (s, items) => database.runAsBot(A, () => handler.handleMessagesUpdate(s, items));
 /** All five commands are adminOnly + groupOnly, so config comes from the admin. */
 const runCmd = (sock, text, botId = A) =>
   run(sock, H.textMsg(text, { sender: H.ADMIN }), botId);
@@ -250,6 +253,68 @@ describe('antiall content protections', () => {
   });
 });
 
+describe('antidelete view-once resurrection', () => {
+  test('deleted VO image is re-sent AS view-once, card quotes it with Type: viewonce', async () => {
+    setAdMode('chat');
+    const { WAMessageStubType } = require('@whiskeysockets/baileys');
+    const s = H.makeSock();
+
+    // Mr A sends a view-once image (caption 'secret peek') then deletes it
+    const secret = 'secret-peek-' + Date.now();
+    await run(s, H.makeMsg(
+      { viewOnceMessageV2: { message: { imageMessage: { caption: secret, viewOnce: true } } } },
+      { sender: H.MEMBER, id: 'VOSTORE9' },
+    ));
+    await H.sleep(200);
+
+    await del(s, [{
+      key: { remoteJid: H.GROUP, id: 'VOSTORE9', fromMe: false, participant: H.MEMBER },
+      update: { messageStubType: WAMessageStubType.REVOKE },
+    }]);
+    await H.sleep(400);
+
+    // 1) the media must have been re-sent, bare, still view-once
+    const voSend = s._rec.images[s._rec.images.length - 1];
+    assert.ok(voSend, 'the view-once media must be re-sent');
+    assert.equal(voSend.viewOnce, true, 'resend must be wrapped as view-once again');
+    assert.equal(voSend.caption, undefined, 'media goes out bare — the card is a separate quoted message');
+
+    // 2) the recovery card must quote the resurrected VO
+    const card = s._rec.texts.find((t) => t.includes('Deleted Message Recovered') && t.includes('viewonce'));
+    assert.ok(card, 'recovery card with Type: viewonce must be sent');
+    const voIdx = s._rec.sent.findIndex((x) => x.content === voSend);
+    const cardSend = s._rec.sent.find((x) => x.content?.text === card);
+    assert.ok(cardSend?.opts?.quoted, 'card must be sent as a quote reply');
+    assert.equal(cardSend.opts.quoted.id, `S${voIdx + 1}`, 'card must quote the resurrected VO message');
+    assert.ok(card.includes('@' + H.MEMBER.split('@')[0]), 'card must mention the original sender');
+
+    // 3) the record is consumed — no double resurrection
+    setAdMode('off');
+  });
+
+  test('non-VO media keeps the classic fused-caption recovery', async () => {
+    setAdMode('chat');
+    const { WAMessageStubType } = require('@whiskeysockets/baileys');
+    const s = H.makeSock();
+
+    await run(s, H.textMsg('plain', { sender: H.MEMBER, id: 'PLAINDEL1' }));
+    await run(s, H.makeMsg({ imageMessage: { caption: 'regular pic' } }, { sender: H.MEMBER, id: 'PICSTORE1' }));
+    await H.sleep(200);
+
+    await del(s, [{
+      key: { remoteJid: H.GROUP, id: 'PICSTORE1', fromMe: false, participant: H.MEMBER },
+      update: { messageStubType: WAMessageStubType.REVOKE },
+    }]);
+    await H.sleep(400);
+
+    const pic = s._rec.images[s._rec.images.length - 1];
+    assert.ok(pic, 'regular image must be re-sent');
+    assert.notEqual(pic.viewOnce, true, 'non-VO image must NOT be wrapped as view-once');
+    assert.ok(pic.caption?.includes('Deleted Message Recovered'), 'classic card rides the caption');
+    setAdMode('off');
+  });
+});
+
 describe('antidelete store hygiene (multi-user scale)', () => {
   const AD = () => require('../commands/owner/antidelete');
 
@@ -329,9 +394,6 @@ describe('antiall master gate (pipeline-first)', () => {
 });
 
 describe('antidelete detector (wdp stub-type port)', () => {
-  // index.js wraps the messages.update listener in runAsBot(bot.id) — mirror that
-  // here, or the detector reads the default bot's (off) mode and bails.
-  const del = (s, items) => database.runAsBot(A, () => handler.handleMessagesUpdate(s, items));
 
   test('non-revoke updates are ignored without error', async () => {
     const s = H.makeSock();
