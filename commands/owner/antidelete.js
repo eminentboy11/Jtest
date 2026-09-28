@@ -275,7 +275,14 @@ const storeMessage = (msg) => {
       inner.documentMessage?.caption ||
       null;
     const mtype = Object.keys(MEDIA_MAP).find(key => inner[key]);
-    if (!text && !mtype) return;
+    if (!text && !mtype) {
+      // DEBUG hunts: prove whether a message was SEEN at all, and why skipped.
+      if (process.env.DEBUG) {
+        const outer = Object.keys(msg.message || {}).join('+') || 'empty';
+        console.log(`[ANTIDELETE] seen ${chatId} id=${msg.key.id} SKIP no-text/media outer=[${outer}]`);
+      }
+      return;
+    }
 
     // View-once marker: the outer wrapper (V2Extension/V2/V1) or the media's
     // own viewOnce flag. Persisted so a deleted VO is re-sent AS view-once
@@ -303,7 +310,7 @@ const storeMessage = (msg) => {
     if (!messageStore.has(chatId)) messageStore.set(chatId, new Map());
     const chatMap = messageStore.get(chatId);
     chatMap.set(msg.key.id, entry);
-    if (process.env.DEBUG) console.log(`[ANTIDELETE] stored ${chatId} id=${msg.key.id} (${entry.type}${entry.isVO ? ' vo' : ''}) chat=${chatMap.size}`);
+    if (process.env.DEBUG) console.log(`[ANTIDELETE] seen ${chatId} id=${msg.key.id} STORED (${entry.type}${entry.isVO ? ' vo' : ''}) chat=${chatMap.size}`);
     if (chatMap.size > 500) chatMap.delete(chatMap.keys().next().value);
 
     // Global FIFO trim: oldest chat first, oldest message within it.
@@ -518,7 +525,7 @@ const handleDelete = async (sock, revokeItems) => {
           const ramIds = ramMap ? [...ramMap.keys()].slice(-5) : [];
           let kvCount = 0;
           try { kvCount = Object.keys(database.getAllKV('antidelete')).filter((k) => k.startsWith('msg:')).length; } catch (_) {}
-          console.log(`[ANTIDELETE] lookup ${chatId} id=${deletedId}: MISS — not in RAM (${ramMap ? ramMap.size : 0} this chat) and not in KV (${kvCount} keys, id-scanned). Verdict: message was never captured — sent before .antidelete was on / before the last restart.`);
+          console.log(`[ANTIDELETE] lookup ${chatId} id=${deletedId}: MISS — not in RAM (${ramMap ? ramMap.size : 0} this chat) and not in KV (${kvCount} keys, id-scanned). Verdict: never captured — sent before .antidelete was on, before the last restart, or during the restart gap (no backfill). Check the console for a [ANTIDELETE] seen ... STORED line with this id; no such line = the bot never received it.`);
         }
       }
       if (!hit) continue;
