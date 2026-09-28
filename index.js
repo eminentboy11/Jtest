@@ -339,6 +339,13 @@ async function bootBot(botId, opts = {}) {
         }
     });
 
+    // Promote/demote/kick events change admin reality — drop the stale
+    // bot-admin verdict for that group immediately (was cached for 2 min,
+    // which made freshly promoted bots keep saying "bot needs to be admin").
+    sock.ev.on('group-participants.update', ({ id }) => {
+        try { require('./handler').invalidateBotAdmin(id); } catch {}
+    });
+
     if (bot.mode === 'code' && bot.phone) {
         setTimeout(() => {
             if (stale()) return;

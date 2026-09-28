@@ -861,6 +861,10 @@ const handleMessage = async (sock, msg) => {
             await sock.sendMessage(from, { text: database.MESSAGES.adminOnly }, { quoted: msg });
             return;
           }
+          if (dynCmd.botAdminNeeded && !extra.isBotAdmin) {
+            await sock.sendMessage(from, { text: database.MESSAGES.botAdminNeeded }, { quoted: msg });
+            return;
+          }
           await dynCmd.execute(sock, msg, cmdArgs, extra);
         }
         return;
@@ -1376,6 +1380,10 @@ module.exports = {
   isBotAdmin,
   isMod,
   isSudo,
+  invalidateBotAdmin: (groupId) => {
+    if (groupId) botAdminCache.delete(groupId);
+    else botAdminCache.clear();
+  },
   getGroupMetadata,
   findParticipant,
   getCommandCount: () => commands.commandCount ?? commands.size,
