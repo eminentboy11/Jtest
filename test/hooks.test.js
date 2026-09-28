@@ -335,6 +335,44 @@ describe('antidelete view-once resurrection', () => {
     setAdMode('off');
   });
 
+  test('KV drift: record stored under the OLD phone-form DM jid recovers when the revoke arrives under @lid', async () => {
+    setAdMode('chat');
+    const { WAMessageStubType } = require('@whiskeysockets/baileys');
+    const ad = require('../commands/owner/antidelete');
+    const s = H.makeSock();
+
+    // capture under the phone-form DM jid, then flush to KV and drop RAM —
+    // simulating a pre-restart capture that now only exists on disk
+    const PHONE_DM = '2348072642047@s.whatsapp.net';
+    const LID_DM = '233256100331525@lid';
+    const dm = H.textMsg('kvdrift-' + Date.now(), { sender: PHONE_DM, id: 'KVDRIFT9' });
+    dm.key.remoteJid = PHONE_DM;
+    database.runAsBot(A, () => ad.storeMessage(dm));
+    database.runAsBot(A, () => ad.flushPersistentMessages());
+    ad._internals.messageStore.clear();
+
+    await del(s, [{
+      key: { remoteJid: LID_DM, id: 'KVDRIFT9', fromMe: false },
+      update: { messageStubType: WAMessageStubType.REVOKE },
+    }]);
+    await H.sleep(350);
+    assert.ok(s._rec.texts.some((t) => t.includes('kvdrift-')), 'KV-wide id scan must recover records stored under a drifted chat jid');
+    setAdMode('off');
+  });
+
+  test('unknown-id revoke: clean no-op with definitive MISS diagnostics', async () => {
+    setAdMode('chat');
+    const { WAMessageStubType } = require('@whiskeysockets/baileys');
+    const s = H.makeSock();
+    await del(s, [{
+      key: { remoteJid: H.GROUP, id: 'NEVERSEEN1', fromMe: false, participant: H.MEMBER },
+      update: { messageStubType: WAMessageStubType.REVOKE },
+    }]);
+    await H.sleep(250);
+    assert.equal(s._rec.sent.length, 0, 'nothing to resurrect → nothing sent, no crash');
+    setAdMode('off');
+  });
+
   test('card mentions the participantAlt phone JID on LID senders', async () => {
     setAdMode('chat');
     const { WAMessageStubType } = require('@whiskeysockets/baileys');

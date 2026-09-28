@@ -213,6 +213,21 @@ function findEntryLoose(chatId, messageId) {
   for (const [cid, map] of messageStore) {
     if (map.has(messageId)) return { entry: map.get(messageId), chatId: cid };
   }
+
+  // KV can hold the record under a different chat-jid form (DMs that used to
+  // arrive with a phone-number jid now arrive as @lid after the rc14 switch).
+  // The exact KV read misses that, so scan the capped namespace by message id.
+  try {
+    const all = database.getAllKV('antidelete');
+    const hitKey = Object.keys(all).find((k) => k.startsWith('msg:') && k.endsWith(`|${messageId}`));
+    if (hitKey) {
+      const row = fromPersistentEntry(all[hitKey]?.payload);
+      if (row) {
+        const kvChat = hitKey.slice(4, hitKey.length - messageId.length - 1);
+        return { entry: row, chatId: kvChat };
+      }
+    }
+  } catch (_) {}
   return null;
 }
 
@@ -503,7 +518,7 @@ const handleDelete = async (sock, revokeItems) => {
           const ramIds = ramMap ? [...ramMap.keys()].slice(-5) : [];
           let kvCount = 0;
           try { kvCount = Object.keys(database.getAllKV('antidelete')).filter((k) => k.startsWith('msg:')).length; } catch (_) {}
-          console.log(`[ANTIDELETE] lookup ${chatId} id=${deletedId}: MISS — capture check: chat RAM=${ramMap ? ramMap.size : 0} [${ramIds.join(',')}] totalKV=${kvCount}`);
+          console.log(`[ANTIDELETE] lookup ${chatId} id=${deletedId}: MISS — not in RAM (${ramMap ? ramMap.size : 0} this chat) and not in KV (${kvCount} keys, id-scanned). Verdict: message was never captured — sent before .antidelete was on / before the last restart.`);
         }
       }
       if (!hit) continue;
