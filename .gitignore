@@ -14,6 +14,7 @@ npm-debug.log*
 June x on/
 
 # Runtime WhatsApp authentication and databases
+/auth/
 /session/
 /sessions/
 /database/
