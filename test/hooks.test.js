@@ -335,6 +335,41 @@ describe('antidelete view-once resurrection', () => {
     setAdMode('off');
   });
 
+  test('view-once media nested inside an ephemeral wrapper is captured and recovered', async () => {
+    setAdMode('chat');
+    const { WAMessageStubType } = require('@whiskeysockets/baileys');
+    const s = H.makeSock();
+
+    await run(s, H.makeMsg(
+      {
+        ephemeralMessage: {
+          message: {
+            viewOnceMessageV2Extension: {
+              message: {
+                imageMessage: { caption: 'nested secret', viewOnce: true },
+              },
+            },
+          },
+        },
+      },
+      { sender: H.MEMBER, id: 'VONESTED1' },
+    ));
+    await H.sleep(100);
+
+    await del(s, [{
+      key: { remoteJid: H.GROUP, id: 'VONESTED1', fromMe: false, participant: H.MEMBER },
+      update: { messageStubType: WAMessageStubType.REVOKE },
+    }]);
+    await H.sleep(250);
+
+    const recovered = s._rec.images.find((item) => item.viewOnce === true);
+    assert.ok(recovered, 'nested view-once media must be re-sent');
+    assert.equal(recovered.caption, undefined, 'nested view-once media stays bare');
+    assert.ok(s._rec.texts.some((text) => text.includes('viewonce')),
+      'nested view-once recovery card must identify the type');
+    setAdMode('off');
+  });
+
   test('KV drift: record stored under the OLD phone-form DM jid recovers when the revoke arrives under @lid', async () => {
     setAdMode('chat');
     const { WAMessageStubType } = require('@whiskeysockets/baileys');

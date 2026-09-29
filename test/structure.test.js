@@ -16,7 +16,7 @@ const path = require('path');
 const vm = require('vm');
 
 const REPO = path.resolve(__dirname, '..');
-const IGNORED_DIRS = new Set(['node_modules', '.git', 'data', 'auth', 'test']);
+const IGNORED_DIRS = new Set(['node_modules', '.git', '.local', '.agents', 'data', 'auth', 'test']);
 
 /** Every JS file in the repo, excluding deps, VCS and runtime data. */
 function repoFiles(ext = '.js') {

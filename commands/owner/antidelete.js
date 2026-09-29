@@ -20,6 +20,9 @@ const messageStore = new Map();
 const pendingPersistence = new Map();
 const PERSIST_DEBOUNCE_MS = 2_000;
 const PERSIST_RETRY_INTERVAL_MS = 5_000;
+const MAX_PRIMED_VO_BYTES = Number(process.env.JUNE_AD_VO_MAX_BYTES) || 32 * 1024 * 1024;
+const MAX_PRIMED_VO_TOTAL = Number(process.env.JUNE_AD_VO_CACHE_BYTES) || 128 * 1024 * 1024;
+let primedViewOnceBytes = 0;
 
 let persistenceTimer = null;
 let lastPersistenceErrorAt = 0;
@@ -38,20 +41,60 @@ const MEDIA_MAP = {
   documentWithCaptionMessage: 'document',
 };
 
+const VO_WRAPPERS = [
+  'viewOnceMessageV2Extension',
+  'viewOnceMessageV2',
+  'viewOnceMessage',
+];
+
 function unwrap(raw) {
-  let inner = (
-    raw.ephemeralMessage?.message ||
-    raw.viewOnceMessageV2Extension?.message ||
-    raw.viewOnceMessageV2?.message ||
-    raw.viewOnceMessage?.message ||
-    raw
-  );
+  let inner = raw;
+  // WhatsApp can stack ephemeral + view-once containers. Walk all layers
+  // instead of selecting only the first one (the old code skipped media when
+  // ephemeralMessage wrapped viewOnceMessageV2).
+  for (let depth = 0; inner && depth < 8; depth += 1) {
+    const next =
+      inner.ephemeralMessage?.message ||
+      inner.viewOnceMessageV2Extension?.message ||
+      inner.viewOnceMessageV2?.message ||
+      inner.viewOnceMessage?.message;
+    if (!next || next === inner) break;
+    inner = next;
+  }
   // rc13+ documents-in-disguise: the container carries the document fields itself
   if (inner?.documentWithCaptionMessage && !inner.documentMessage) {
     const doc = inner.documentWithCaptionMessage.message || inner.documentWithCaptionMessage;
     if (doc && (doc.url || doc.mediaKey)) inner = { ...inner, documentMessage: doc };
   }
   return inner;
+}
+
+function isViewOnce(raw) {
+  let current = raw;
+  for (let depth = 0; current && depth < 8; depth += 1) {
+    if (
+      current.imageMessage?.viewOnce === true ||
+      current.videoMessage?.viewOnce === true ||
+      current.audioMessage?.viewOnce === true
+    ) return true;
+
+    const next =
+      current.ephemeralMessage?.message ||
+      current.viewOnceMessageV2Extension?.message ||
+      current.viewOnceMessageV2?.message ||
+      current.viewOnceMessage?.message;
+    if (!next || next === current) break;
+
+    // A wrapper is authoritative even when the inner media object no longer
+    // carries a direct viewOnce flag after Baileys normalises the message.
+    if (
+      current.viewOnceMessageV2Extension ||
+      current.viewOnceMessageV2 ||
+      current.viewOnceMessage
+    ) return true;
+    current = next;
+  }
+  return false;
 }
 
 function recordKey(chatId, messageId) {
@@ -234,6 +277,8 @@ function findEntryLoose(chatId, messageId) {
 function removeStoredEntry(chatId, messageId) {
   const chatMap = messageStore.get(chatId);
   if (chatMap) {
+    const entry = chatMap.get(messageId);
+    if (entry?.mediaBuffer) primedViewOnceBytes -= entry.mediaBuffer.length;
     chatMap.delete(messageId);
     if (chatMap.size === 0) messageStore.delete(chatId);
   }
@@ -287,14 +332,7 @@ const storeMessage = (msg) => {
     // View-once marker: the outer wrapper (V2Extension/V2/V1) or the media's
     // own viewOnce flag. Persisted so a deleted VO is re-sent AS view-once
     // even after a restart.
-    const isVO = !!(
-      msg.message.viewOnceMessageV2Extension ||
-      msg.message.viewOnceMessageV2 ||
-      msg.message.viewOnceMessage ||
-      inner.imageMessage?.viewOnce ||
-      inner.videoMessage?.viewOnce ||
-      inner.audioMessage?.viewOnce
-    );
+    const isVO = isViewOnce(msg.message);
 
     const entry = {
       sender,
@@ -327,20 +365,50 @@ const storeMessage = (msg) => {
     // SQLite is the persistent record path; the memory Map remains only the
     // immediate hot cache for messages arriving during this process lifetime.
     queuePersistentMessage(chatId, msg.key.id, entry);
+
+    // View-once media may be unavailable after WhatsApp consumes the message.
+    // Prime a bounded in-memory copy while the CDN material is still usable.
+    if (entry.isVO) primeViewOnceMedia(entry);
   } catch (_) {}
 };
 
-async function downloadMedia(stored) {
+async function downloadMediaFromMessage(stored, maxBytes = Infinity) {
   try {
     const { inner, mtype } = stored;
     if (!inner || !mtype || !inner[mtype]) return null;
     const stream = await downloadContentFromMessage(inner[mtype], MEDIA_MAP[mtype]);
     const chunks = [];
-    for await (const chunk of stream) chunks.push(chunk);
+    let size = 0;
+    for await (const chunk of stream) {
+      size += chunk.length;
+      if (size > maxBytes) return null;
+      chunks.push(chunk);
+    }
     return Buffer.concat(chunks);
   } catch {
     return null;
   }
+}
+
+function primeViewOnceMedia(stored) {
+  if (!stored?.isVO || stored.mediaPromise || stored.mediaBuffer) return;
+  stored.mediaPromise = downloadMediaFromMessage(stored, MAX_PRIMED_VO_BYTES)
+    .then((buffer) => {
+      if (!buffer || primedViewOnceBytes + buffer.length > MAX_PRIMED_VO_TOTAL) return null;
+      stored.mediaBuffer = buffer;
+      primedViewOnceBytes += buffer.length;
+      return buffer;
+    })
+    .catch(() => null);
+}
+
+async function downloadMedia(stored) {
+  if (stored?.mediaBuffer) return stored.mediaBuffer;
+  if (stored?.mediaPromise) {
+    const primed = await stored.mediaPromise;
+    if (primed) return primed;
+  }
+  return downloadMediaFromMessage(stored);
 }
 
 async function getChatLabel(sock, chatId) {
