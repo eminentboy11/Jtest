@@ -1518,7 +1518,7 @@ const handleMessagesUpdate = async (sock, updates) => {
       }
     }
 
-    if (process.env.DEBUG) {
+    if (process.env.DEBUG || process.env.JUNE_ANTIDELETE_DEBUG) {
       try {
         const stubs = updates.map((u) => u?.update?.messageStubType).filter((x) => x !== undefined);
         console.log(`[ANTIDELETE] bot=${global.__BOT_ID__ || 'default'} mode=${database.getAntideleteMode()} n=${updates.length} stubs=[${stubs}] revokes=${revokes.length}`);

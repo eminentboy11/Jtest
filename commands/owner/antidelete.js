@@ -26,6 +26,9 @@ let primedViewOnceBytes = 0;
 
 let persistenceTimer = null;
 let lastPersistenceErrorAt = 0;
+const debugLog = (...args) => {
+  if (process.env.DEBUG || process.env.JUNE_ANTIDELETE_DEBUG) console.log(...args);
+};
 
 const getMode = () => database.getAntideleteMode();
 const getTimezone = () => database.getTimeZone();
@@ -322,7 +325,7 @@ const storeMessage = (msg) => {
     const mtype = Object.keys(MEDIA_MAP).find(key => inner[key]);
     if (!text && !mtype) {
       // DEBUG hunts: prove whether a message was SEEN at all, and why skipped.
-      if (process.env.DEBUG) {
+      if (process.env.DEBUG || process.env.JUNE_ANTIDELETE_DEBUG) {
         const outer = Object.keys(msg.message || {}).join('+') || 'empty';
         console.log(`[ANTIDELETE] seen ${chatId} id=${msg.key.id} SKIP no-text/media outer=[${outer}]`);
       }
@@ -348,7 +351,7 @@ const storeMessage = (msg) => {
     if (!messageStore.has(chatId)) messageStore.set(chatId, new Map());
     const chatMap = messageStore.get(chatId);
     chatMap.set(msg.key.id, entry);
-    if (process.env.DEBUG) console.log(`[ANTIDELETE] seen ${chatId} id=${msg.key.id} STORED (${entry.type}${entry.isVO ? ' vo' : ''}) chat=${chatMap.size}`);
+    debugLog(`[ANTIDELETE] seen ${chatId} id=${msg.key.id} STORED (${entry.type}${entry.isVO ? ' vo' : ''}) chat=${chatMap.size}`);
     if (chatMap.size > 500) chatMap.delete(chatMap.keys().next().value);
 
     // Global FIFO trim: oldest chat first, oldest message within it.
@@ -375,7 +378,10 @@ const storeMessage = (msg) => {
 async function downloadMediaFromMessage(stored, maxBytes = Infinity) {
   try {
     const { inner, mtype } = stored;
-    if (!inner || !mtype || !inner[mtype]) return null;
+    if (!inner || !mtype || !inner[mtype]) {
+      debugLog(`[ANTIDELETE] media unavailable type=${stored?.type || 'unknown'} mtype=${mtype || 'none'}`);
+      return null;
+    }
     const stream = await downloadContentFromMessage(inner[mtype], MEDIA_MAP[mtype]);
     const chunks = [];
     let size = 0;
@@ -385,7 +391,8 @@ async function downloadMediaFromMessage(stored, maxBytes = Infinity) {
       chunks.push(chunk);
     }
     return Buffer.concat(chunks);
-  } catch {
+  } catch (error) {
+    debugLog(`[ANTIDELETE] media download failed type=${stored?.type || 'unknown'} mtype=${stored?.mtype || 'none'}: ${error?.message || error}`);
     return null;
   }
 }
@@ -394,9 +401,17 @@ function primeViewOnceMedia(stored) {
   if (!stored?.isVO || stored.mediaPromise || stored.mediaBuffer) return;
   stored.mediaPromise = downloadMediaFromMessage(stored, MAX_PRIMED_VO_BYTES)
     .then((buffer) => {
-      if (!buffer || primedViewOnceBytes + buffer.length > MAX_PRIMED_VO_TOTAL) return null;
+      if (!buffer) {
+        debugLog(`[ANTIDELETE] view-once prime failed type=${stored.type}`);
+        return null;
+      }
+      if (primedViewOnceBytes + buffer.length > MAX_PRIMED_VO_TOTAL) {
+        debugLog(`[ANTIDELETE] view-once prime skipped: cache limit reached (${buffer.length} bytes)`);
+        return null;
+      }
       stored.mediaBuffer = buffer;
       primedViewOnceBytes += buffer.length;
+      debugLog(`[ANTIDELETE] view-once primed type=${stored.type} bytes=${buffer.length}`);
       return buffer;
     })
     .catch(() => null);
