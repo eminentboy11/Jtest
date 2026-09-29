@@ -66,6 +66,7 @@ async function boot(opts = {}) {
 
   process.env.JUNE_DATA_DIR = dataDir;
   process.env.JUNE_DB_FLUSH_MS = String(opts.flushMs || 40);
+  for (const [k, v] of Object.entries(opts.env || {})) process.env[k] = String(v);
   process.chdir(REPO);
   if (!module.paths.includes(path.join(REPO, 'node_modules'))) {
     module.paths.unshift(path.join(REPO, 'node_modules'));

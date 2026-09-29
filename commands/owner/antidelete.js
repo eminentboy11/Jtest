@@ -10,7 +10,10 @@
  *   → SQLite antidelete_messages for recovery after a restart
  *
  * There is no file-backed backup, standalone anti-delete JSON, or second
- * persistent message store.
+ * persistent message store. View-once media bytes live in RAM only (bounded
+ * prime cache) UNLESS JUNE_AD_VO_PERSIST=1, which additionally stores small
+ * primed buffers (default <=2MB, max 200) in the same SQLite KV so a deleted
+ * view-once still resurrects after a restart.
  */
 
 const database = require('../../database');
@@ -29,6 +32,57 @@ let lastPersistenceErrorAt = 0;
 const debugLog = (...args) => {
   if (process.env.DEBUG || process.env.JUNE_ANTIDELETE_DEBUG) console.log(...args);
 };
+
+// ── Restart persistence for primed view-once media (opt-in) ──────────────────
+// Primed VO buffers are RAM-only, so a restart loses them and the VO CDN link
+// is usually dead by then. With JUNE_AD_VO_PERSIST=1 a successful prime also
+// writes the bytes into the bot's SQLite KV (namespace 'antidelete', keys
+// 'vo:...') and the resend path loads them back after a restart. Small media
+// only (default 2MB) with an entry cap — this is a recovery cache, not storage.
+const voPersistEnabled = () => process.env.JUNE_AD_VO_PERSIST === '1';
+const VO_PERSIST_MAX_BYTES = Number(process.env.JUNE_AD_VO_PERSIST_MAX_BYTES) || 2 * 1024 * 1024;
+const VO_PERSIST_MAX_ENTRIES = Number(process.env.JUNE_AD_VO_PERSIST_MAX_ENTRIES) || 200;
+const voKey = (chatId, messageId) => `vo:${String(chatId)}|${String(messageId)}`;
+
+function persistPrimedVo(chatId, messageId, buffer) {
+  if (!voPersistEnabled() || !buffer || buffer.length > VO_PERSIST_MAX_BYTES) return;
+  try {
+    database.setKV('antidelete', voKey(chatId, messageId), { b64: buffer.toString('base64'), storedAt: Date.now() });
+    const all = database.getAllKV('antidelete');
+    const vos = Object.entries(all).filter(([k]) => k.startsWith('vo:'));
+    if (vos.length > VO_PERSIST_MAX_ENTRIES) {
+      vos.sort((a, b) => (a[1]?.storedAt || 0) - (b[1]?.storedAt || 0));
+      for (const [k] of vos.slice(0, vos.length - VO_PERSIST_MAX_ENTRIES)) {
+        try { database.delKV('antidelete', k); } catch (_) {}
+      }
+    }
+    debugLog(`[ANTIDELETE] view-once persisted type=cache bytes=${buffer.length}`);
+  } catch (error) {
+    reportPersistenceError(error);
+  }
+}
+
+function loadPrimedVo(chatId, messageId) {
+  if (!voPersistEnabled() || !chatId || !messageId) return null;
+  try {
+    const rec = database.getKV('antidelete', voKey(chatId, messageId));
+    if (!rec?.b64) return null;
+    const buffer = Buffer.from(rec.b64, 'base64');
+    return buffer.length ? buffer : null;
+  } catch (_) { return null; }
+}
+
+function deletePrimedVo(chatId, messageId) {
+  if (!chatId || !messageId) return;
+  try { database.delKV('antidelete', voKey(chatId, messageId)); } catch (_) {}
+}
+
+function wipePrimedVo() {
+  try {
+    const all = database.getAllKV('antidelete');
+    for (const k of Object.keys(all)) if (k.startsWith('vo:')) { try { database.delKV('antidelete', k); } catch (_) {} }
+  } catch (_) {}
+}
 
 const getMode = () => database.getAntideleteMode();
 const getTimezone = () => database.getTimeZone();
@@ -277,15 +331,26 @@ function findEntryLoose(chatId, messageId) {
   return null;
 }
 
+// One decrement per buffer release — every eviction path (per-chat overflow,
+// global FIFO trim, id overwrite, recover-then-drop, mode off) must go through
+// this or primedViewOnceBytes phantom-inflates until priming stops entirely.
+function releasePrimed(entry) {
+  if (entry?.mediaBuffer) {
+    primedViewOnceBytes -= entry.mediaBuffer.length;
+    if (primedViewOnceBytes < 0) primedViewOnceBytes = 0;
+    entry.mediaBuffer = null;
+  }
+}
+
 function removeStoredEntry(chatId, messageId) {
   const chatMap = messageStore.get(chatId);
   if (chatMap) {
-    const entry = chatMap.get(messageId);
-    if (entry?.mediaBuffer) primedViewOnceBytes -= entry.mediaBuffer.length;
+    releasePrimed(chatMap.get(messageId));
     chatMap.delete(messageId);
     if (chatMap.size === 0) messageStore.delete(chatId);
   }
   pendingPersistence.delete(recordKey(chatId, messageId));
+  deletePrimedVo(chatId, messageId);
 
   try {
     database.deleteAntideleteMessage(chatId, messageId);
@@ -350,9 +415,14 @@ const storeMessage = (msg) => {
 
     if (!messageStore.has(chatId)) messageStore.set(chatId, new Map());
     const chatMap = messageStore.get(chatId);
+    releasePrimed(chatMap.get(msg.key.id)); // id re-delivery must not orphan a buffer
     chatMap.set(msg.key.id, entry);
     debugLog(`[ANTIDELETE] seen ${chatId} id=${msg.key.id} STORED (${entry.type}${entry.isVO ? ' vo' : ''}) chat=${chatMap.size}`);
-    if (chatMap.size > 500) chatMap.delete(chatMap.keys().next().value);
+    if (chatMap.size > 500) {
+      const oldestId = chatMap.keys().next().value;
+      releasePrimed(chatMap.get(oldestId));
+      chatMap.delete(oldestId);
+    }
 
     // Global FIFO trim: oldest chat first, oldest message within it.
     let total = 0;
@@ -360,7 +430,9 @@ const storeMessage = (msg) => {
     while (total > ramMax) {
       const oldestChat = messageStore.keys().next().value;
       const m = messageStore.get(oldestChat);
-      m.delete(m.keys().next().value);
+      const oldestId = m.keys().next().value;
+      releasePrimed(m.get(oldestId));
+      m.delete(oldestId);
       if (!m.size) messageStore.delete(oldestChat);
       total--;
     }
@@ -371,7 +443,11 @@ const storeMessage = (msg) => {
 
     // View-once media may be unavailable after WhatsApp consumes the message.
     // Prime a bounded in-memory copy while the CDN material is still usable.
-    if (entry.isVO) primeViewOnceMedia(entry);
+    if (entry.isVO) {
+      entry._chatId = chatId;
+      entry._messageId = msg.key.id;
+      primeViewOnceMedia(entry);
+    }
   } catch (_) {}
 };
 
@@ -412,16 +488,25 @@ function primeViewOnceMedia(stored) {
       stored.mediaBuffer = buffer;
       primedViewOnceBytes += buffer.length;
       debugLog(`[ANTIDELETE] view-once primed type=${stored.type} bytes=${buffer.length}`);
+      persistPrimedVo(stored._chatId, stored._messageId, buffer);
       return buffer;
     })
     .catch(() => null);
 }
 
-async function downloadMedia(stored) {
+async function downloadMedia(stored, origin = {}) {
   if (stored?.mediaBuffer) return stored.mediaBuffer;
   if (stored?.mediaPromise) {
     const primed = await stored.mediaPromise;
     if (primed) return primed;
+  }
+  // Post-restart path: RAM is empty, but JUNE_AD_VO_PERSIST may have the bytes.
+  const fromDisk = loadPrimedVo(origin.chatId, origin.messageId);
+  if (fromDisk) {
+    stored.mediaBuffer = fromDisk;
+    primedViewOnceBytes += fromDisk.length;
+    debugLog(`[ANTIDELETE] view-once restored from persistence bytes=${fromDisk.length}`);
+    return fromDisk;
   }
   return downloadMediaFromMessage(stored);
 }
@@ -440,7 +525,7 @@ async function getChatLabel(sock, chatId) {
   }
 }
 
-async function sendRecovered(sock, targetJid, stored, originChat) {
+async function sendRecovered(sock, targetJid, stored, originChat, origin = {}) {
   const mentionJid = stored.senderAlt || stored.sender || null;
   const senderNum = mentionJid?.split('@')[0]?.split(':')[0] || 'Unknown';
   // A deleted view-once is always labelled 'viewonce' — that is the whole point.
@@ -480,7 +565,7 @@ async function sendRecovered(sock, targetJid, stored, originChat) {
   // The media goes out bare (no caption) wrapped in view-once again, then the
   // recovery card arrives as a separate message QUOTING the resurrected VO.
   if (stored.isVO && ['image', 'video', 'audio'].includes(stored.type)) {
-    const buffer = await downloadMedia(stored);
+    const buffer = await downloadMedia(stored, origin);
     if (!buffer) {
       await sock.sendMessage(targetJid, {
         text: `${meta}⚠️ _Media expired (CDN link gone)._\n${divider}`,
@@ -613,7 +698,7 @@ const handleDelete = async (sock, revokeItems) => {
       }
       if (!hit) continue;
 
-      await sendRecovered(sock, targetJid, hit.entry, chatId);
+      await sendRecovered(sock, targetJid, hit.entry, chatId, { chatId: hit.chatId, messageId: deletedId });
       // A recovered record no longer needs to occupy the capped SQLite store.
       removeStoredEntry(hit.chatId, deletedId);
     }
@@ -651,7 +736,18 @@ module.exports = {
 
   storeMessage,
   handleDelete,
-  _internals: { messageStore, pendingPersistence, setRamLimit },
+  _internals: {
+    messageStore, pendingPersistence, setRamLimit,
+    getPrimedBytes: () => primedViewOnceBytes,
+    // Test seam for "restart": empties RAM exactly like a process restart
+    // would, while the SQLite KV (including persisted VO media) survives.
+    resetRuntime() {
+      for (const map of messageStore.values()) for (const e of map.values()) releasePrimed(e);
+      messageStore.clear();
+      pendingPersistence.clear();
+      primedViewOnceBytes = 0;
+    },
+  },
   getStoreStats,
   flush: flushPersistentMessages,
   flushPersistentMessages,
@@ -665,7 +761,9 @@ module.exports = {
       globalMode === 'private' ? '✅ ON — Private' : '❌ OFF';
 
     if (!sub || sub === 'status') {
-      return reply(`🗑️ Anti-Delete: *${statusLabel}*\n\n.antidelete on | private | off`);
+      const mb = (primedViewOnceBytes / (1024 * 1024)).toFixed(1);
+      const persist = voPersistEnabled() ? 'on' : 'off';
+      return reply(`🗑️ Anti-Delete: *${statusLabel}*\n🧠 Primed VO cache: ${mb} MB\n💾 VO restart cache: ${persist}\n\n.antidelete on | private | off`);
     }
     if (sub === 'on' || sub === 'chat') {
       database.setAntideleteMode('chat');
@@ -678,8 +776,11 @@ module.exports = {
     if (sub === 'off') {
       database.setAntideleteMode('off');
       // Free the memory immediately — no recovery is expected while off.
+      for (const map of messageStore.values()) for (const e of map.values()) releasePrimed(e);
       messageStore.clear();
       pendingPersistence.clear();
+      primedViewOnceBytes = 0;
+      wipePrimedVo();
       return reply('🗑️ Anti-Delete set to *OFF*. Message cache released.');
     }
     return reply('⚠️ Usage: .antidelete on | private | off | status');
