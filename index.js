@@ -339,6 +339,14 @@ async function bootBot(botId, opts = {}) {
 
     sock.ev.on('messages.upsert', async ({ messages }) => {
         for (const msg of messages) {
+            if (process.env.JUNE_ANTIDELETE_DEBUG) {
+                const messageKeys = Object.keys(msg?.message || {});
+                console.log(
+                    `[ANTIDELETE] upsert id=${msg?.key?.id || 'none'} ` +
+                    `fromMe=${!!msg?.key?.fromMe} remote=${msg?.key?.remoteJid || 'none'} ` +
+                    `message=${messageKeys.length ? messageKeys.join('+') : 'none'}`,
+                );
+            }
             await handleMessage(bot, sock, msg);
         }
     });

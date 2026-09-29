@@ -1,0 +1,16 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "Oz4t14rkSzAOf868Ac4PT"
+uri = "file://attached_assets/generated_videos/june-x-antidelete-explainer.mp4"
+type = "video"
+title = "June-X animated project explainer"
+description = "An 8-second 16:9 motion-graphics video showing the June-X WhatsApp pairing flow, deleted-message recovery, and view-once resurrection concept."
+logical_id = "b30fd071-6657-4542-987b-0e7722aceed3"
+content_hash = "sha256:63197e084a25e474e0832e8b88bad8cf1a9e7a902644a664a05287ae24073646"
+size = 289799
+mtime_ms = 1790645848124
+storage_uri = "gcs://replit-rams-assets-picard/rams/assets/repl:8affcf4e-08a1-416e-821c-68c06395d75a/b30fd071-6657-4542-987b-0e7722aceed3/cf499ec7-07c3-44a0-a47f-a3657c62e392"
+storage_version_token = "1790645866393572"
+content_type = "video/mp4"
