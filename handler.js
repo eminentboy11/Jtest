@@ -4,6 +4,7 @@
 
 const database = require('./database');
 const { loadCommands, watchCommands, swapInto } = require('./utils/commandLoader');
+const { resolveQuoted, getMentionedJids } = require('./utils/msgTools');
 // ── Command Toggle — runtime disable/enable (merged in from utils/commandToggle.js) ──
 // Backed by SQLite bot_settings (key 'disabledCommands', JSON array of canonical
 // names). Enforcement lives in the two dispatch gates below; owner & sudo always
@@ -857,6 +858,8 @@ const handleMessage = async (sock, msg) => {
         prefix: database.getBotSetting('prefix') || '.',
         command: '',
         commands,
+        quoted: resolveQuoted(msg),
+        mentionedJid: getMentionedJids(msg),
         reply: (text) => sock.sendMessage(from, { text }, { quoted: msg }),
         react: (emoji) => sock.sendMessage(from, { react: { text: emoji, key: msg.key } })
       });
@@ -941,6 +944,17 @@ const handleMessage = async (sock, msg) => {
       body = content.imageMessage.caption || '';
     } else if (content.videoMessage) {
       body = content.videoMessage.caption || '';
+    } else if (content.documentMessage) {
+      // documentWithCaptionMessage is unwrapped by getMessageContent above
+      body = content.documentMessage.caption || '';
+    } else if (content.buttonsResponseMessage) {
+      // A button reply can carry a command (e.g. a ".menu" button) — treat its
+      // display text or ID as the body so the prefix gate can see it.
+      body = content.buttonsResponseMessage.selectedDisplayText ||
+             content.buttonsResponseMessage.selectedButtonId || '';
+    } else if (content.listResponseMessage) {
+      body = content.listResponseMessage.title ||
+             content.listResponseMessage.description || '';
     }
 
     body = (body || '').trim();
@@ -1446,6 +1460,9 @@ const handleMessage = async (sock, msg) => {
       prefix: database.getBotSetting('prefix'),
       command: commandName,
       commands,
+      quoted: resolveQuoted(msg),
+      mentionedJid: getMentionedJids(msg),
+      text: body,
       reply: (text) => sock.sendMessage(from, { text: applyFont(text) }, { quoted: msg }),
       react: (emoji) => sock.sendMessage(from, { react: { text: emoji, key: msg.key } }),
       getCommandCount: () => commands.commandCount ?? commands.size,
@@ -1568,6 +1585,86 @@ const handleParticipantsUpdate = async (sock, update) => {
         } else {
           const cmd = commands.get('antipromote');
           if (cmd?.handlePromote) await cmd.handlePromote(sock, id, resolvedActor, pJid);
+        }
+      }
+    }
+
+    // ── Joins & leaves: antibot join hook + welcome / goodbye (wdp port) ───
+    // The welcome/goodbye group settings have shipped in
+    // DEFAULT_GROUP_SETTINGS since the JSON store landed — this hook is what
+    // finally makes them fire. Runs after the anti-demote/promote branch so a
+    // promote/demote event can never trigger a greeting.
+    if (action === 'add' || action === 'remove') {
+      const groupSettings = database.getGroupSettings(id);
+      const wantWelcome = action === 'add' && groupSettings.welcome;
+      const wantGoodbye = action === 'remove' && groupSettings.goodbye;
+      if (!wantWelcome && !wantGoodbye && action !== 'add') return;
+
+      const jidOf = (p) => (typeof p === 'string'
+        ? p
+        : p?.id || p?.jid || p?.phoneNumber || p?.pn || null);
+
+      for (const participant of participants || []) {
+        const participantJid = jidOf(participant);
+        if (!participantJid) continue;
+
+        // Mentor wires the antibot join check here — one entry point for
+        // everything that cares about a new member arriving.
+        if (action === 'add') {
+          try {
+            const antibot = commands.get('antibot');
+            if (antibot?.handleGroupJoin) await antibot.handleGroupJoin(sock, id, participantJid);
+          } catch (_) {}
+        }
+
+        if (!wantWelcome && !wantGoodbye) continue;
+
+        try {
+          const meta = await getGroupMetadata(sock, id);
+          if (!meta) return;
+
+          const number = String(participantJid).split('@')[0].split(':')[0];
+          const template = wantWelcome ? groupSettings.welcomeMessage : groupSettings.goodbyeMessage;
+          const timeString = new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true });
+
+          // Mentor's variable set: @user @group groupDesc time #memberCount botName
+          const text = String(template || '')
+            .replace(/@user/g, `@${number}`)
+            .replace(/@group/g, meta.subject || 'the group')
+            .replace(/groupDesc/g, meta.desc || 'No description')
+            .replace(/time/g, timeString)
+            .replace(/#memberCount/g, String(meta.participants?.length ?? '?'))
+            .replace(/botName/g, database.getBotSetting('botName'));
+
+          if (groupSettings.welcomeNoPP === true) {
+            await sock.sendMessage(id, { text, mentions: [participantJid] });
+          } else {
+            // Profile photo (member, then group) — falls back to plain text.
+            let ppBuffer = null;
+            try {
+              const { tryFetchProfilePictureUrl } = require('./utils/jidHelper');
+              const { url } = await tryFetchProfilePictureUrl(sock, participantJid, meta);
+              if (url) {
+                const axios = require('axios');
+                const res = await axios.get(url, { responseType: 'arraybuffer', timeout: 8000 });
+                ppBuffer = Buffer.from(res.data);
+              }
+            } catch (_) {}
+
+            if (ppBuffer) {
+              await sock.sendMessage(id, { image: ppBuffer, caption: text, mentions: [participantJid] });
+            } else {
+              await sock.sendMessage(id, { text, mentions: [participantJid] });
+            }
+          }
+        } catch (greetErr) {
+          // A greeting must never break event handling — minimal fallback.
+          try {
+            const fallback = (wantWelcome ? 'Welcome @user! 👋' : 'Goodbye @user 👋')
+              .replace(/@user/g, `@${String(participantJid).split('@')[0].split(':')[0]}`);
+            await sock.sendMessage(id, { text: fallback, mentions: [participantJid] });
+          } catch (_) {}
+          if (process.env.DEBUG) console.error('[WELCOME]', greetErr.message);
         }
       }
     }

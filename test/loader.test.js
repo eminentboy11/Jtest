@@ -83,6 +83,13 @@ describe('discovery', () => {
       'deploy',
       'disable',
       'enable',
+      // the ..wdp mentor port: group administration
+      'kick', 'promote', 'demote', 'hidetag', 'grouplink', 'revoke',
+      'setgname', 'setgdesc', 'staff',
+      // the ..wdp mentor port: warnings & mutes (backed by the JSON store)
+      'warn', 'resetwarn', 'mute', 'unmute',
+      // the ..wdp mentor port: welcome / goodbye greetings
+      'welcome', 'setwelcome', 'goodbye', 'setgoodbye',
     ].sort();
     const actual = [...new Set([...table.values()].map((c) => c.name))].sort();
     assert.deepEqual(actual, expected);
