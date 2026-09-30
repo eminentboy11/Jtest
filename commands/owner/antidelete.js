@@ -21,6 +21,46 @@ const { downloadContentFromMessage } = require('@whiskeysockets/baileys');
 
 const messageStore = new Map();
 const pendingPersistence = new Map();
+
+// ── Recently recovered deletes — the record `.snipe` reads ───────────────────
+//
+// handleDelete() re-sends a recovered message and then frees the stored entry
+// (removeStoredEntry), so the data would be gone the instant it was recovered.
+// This keeps a small, bounded tail of what was deleted where, newest last, so
+// `.snipe` can report a delete without re-sending the original media.
+//
+// Text is copied; the media buffer is deliberately NOT retained here beyond the
+// entry object (releasePrimed still governs the primed bytes), so snipe adds no
+// meaningful RAM on top of what antidelete already holds.
+const recentDeletes = new Map();
+const RECENT_DELETES_MAX = Number(process.env.JUNE_SNIPE_MAX) || 20;
+
+function rememberDelete(chatId, messageId, entry, originChatId) {
+  let list = recentDeletes.get(chatId);
+  if (!list) { list = []; recentDeletes.set(chatId, list); }
+  list.push({
+    id: messageId,
+    at: Date.now(),
+    originChatId: originChatId || chatId,
+    sender: entry.sender || null,
+    senderAlt: entry.senderAlt || null,
+    type: entry.type || 'text',
+    isVO: !!entry.isVO,
+    text: entry.text || null,
+    entry,
+  });
+  while (list.length > RECENT_DELETES_MAX) list.shift();
+}
+
+/** Newest-first slice of what was deleted in `chatId`. */
+function getRecentDeletes(chatId, limit = 1) {
+  const list = recentDeletes.get(chatId) || [];
+  const n = Math.max(1, Math.floor(Number(limit) || 1));
+  return list.slice(-n).reverse();
+}
+
+function clearRecentDeletes() { recentDeletes.clear(); }
+
 const PERSIST_DEBOUNCE_MS = 2_000;
 const PERSIST_RETRY_INTERVAL_MS = 5_000;
 const MAX_PRIMED_VO_BYTES = Number(process.env.JUNE_AD_VO_MAX_BYTES) || 32 * 1024 * 1024;
@@ -698,6 +738,9 @@ const handleDelete = async (sock, revokeItems) => {
       }
       if (!hit) continue;
 
+      // Record before the entry is freed below — this is what `.snipe` reads.
+      rememberDelete(chatId, deletedId, hit.entry, hit.chatId);
+
       await sendRecovered(sock, targetJid, hit.entry, chatId, { chatId: hit.chatId, messageId: deletedId });
       // A recovered record no longer needs to occupy the capped SQLite store.
       removeStoredEntry(hit.chatId, deletedId);
@@ -736,6 +779,8 @@ module.exports = {
 
   storeMessage,
   handleDelete,
+  getRecentDeletes,
+  clearRecentDeletes,
   _internals: {
     messageStore, pendingPersistence, setRamLimit,
     getPrimedBytes: () => primedViewOnceBytes,
@@ -745,6 +790,7 @@ module.exports = {
       for (const map of messageStore.values()) for (const e of map.values()) releasePrimed(e);
       messageStore.clear();
       pendingPersistence.clear();
+      clearRecentDeletes();
       primedViewOnceBytes = 0;
     },
   },

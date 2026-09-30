@@ -17,7 +17,7 @@ Previous edition was **9MB + 700 deps (48 packages, ffmpeg, sharp, jimp, ytdl, s
 - **Tiered storage** — HOT RAM (LRU bot stores, idle unload) → WARM disk (`data/` + `auth/`) → COLD GitHub (`june-web-data`: one `bots/<id>.tar.gz` per offline+idle bot, pushed over the git wire protocol, zero REST quota). Live bots are never archived; waking a cold bot is one pull+extract. `JUNE_DATA_REPO` empty = feature off
 - **Quiet console by default** — per-bot lifecycle chatter (event dumps, close reasons, pairing attempts, purge traces) logs only with `DEBUG=true` in env; otherwise only actionable lines print
 - **No JUNE_PLATFORM toggle** — always web
-- **53 commands shipped** behind a real hot-reloading loader — drop a file in `commands/` and it registers without a restart:
+- **68 commands shipped** behind a real hot-reloading loader — drop a file in `commands/` and it registers without a restart:
   - health: `.ping`, `.uptime`
   - moderation: `.antispam`, `.antiviewonce`, `.antibot`, `.antiforward`, `.antitagadmins`, `.antidelete`, `.antiall`
   - group admin (ported from the June X / `..wdp` core): `.kick`, `.promote`, `.demote`, `.hidetag`, `.grouplink`, `.revoke`, `.setgname`, `.setgdesc`, `.staff`
@@ -26,6 +26,31 @@ Previous edition was **9MB + 700 deps (48 packages, ffmpeg, sharp, jimp, ytdl, s
   - utility: `.menu`, `.help`, `.sticker`, `.vv`/`.vv2`, `.save`, `.mygroups`, `.chatbot`
   - owner tools: `.mode`, `.setprefix`, `.setfont`, `.setbotpp`, `.autoreact`, `.autotyping`, `.autorecording`, `.autorecordtype`, `.add`, `.all`, `.tagall`
   - rich-app games: `.ttt2`, `.tod`, `.snake`
+  - group membership (ported from `..wdp`): `.join`, `.leave`, `.approve`, `.reject`
+    (join requests), `.kickinactive`, `.kickactive` (activity-driven sweeps),
+    `.groupinfo`
+  - owner blocking: `.block`, `.unblock` (mention, reply, or raw phone number)
+  - group extras: `.poll` (native WhatsApp polls), `.myactivity`, `.autosticker`
+  - link gates: `.nsfw` and `.detect` — see below
+
+  **Link gates.** `nsfw` and `detect` existed in `DEFAULT_GROUP_SETTINGS` as
+  dormant keys that nothing read; both now have commands *and* real enforcement
+  in `handler.js`'s content-protection chain, next to antilink. Rules live in
+  `utils/contentGates.js` so the commands and the handler cannot drift apart.
+
+  | setting | default | effect |
+  |---|---|---|
+  | `nsfw` | **off** | adult-content links from non-admins are deleted; `.nsfw on` allows them |
+  | `detect` | **off** | `.detect on` deletes deceptive links (raw IPs, punycode/look-alike domains, shorteners, high-risk TLDs) |
+
+  `.detect` is *not* a second `.antibot`: `.antibot` detects bot **accounts** and
+  kicks them, `.detect` scans link **content** and removes the message.
+
+  **`.snipe`** reports recently deleted messages (who/when/type/preview) from
+  antidelete's delete record — it does not keep a second copy of every message,
+  and it does not re-send media (that stays `.antidelete`'s job). Because
+  antidelete is what captures, `.snipe` needs it enabled and says so plainly
+  rather than reporting an empty chat.
 
   This edition is deliberately a light gateway plus a core command set. The full
   300-command June X experience is a different deployment: if a user wants more
