@@ -67,39 +67,37 @@ describe('discovery', () => {
     assert.ok(table.get('ping'), 'ping must be found');
     assert.ok(table.get('uptime'), 'uptime must be found');
     assert.equal(table.commandCount, BASE_COMMANDS);
-    // The shipped set: health, moderation, the restored June X nine, and the
-    // three rich-app games. Asserted by name so a surprise command is visible.
-    const expected = [
-      'ping', 'uptime',
-      'antispam', 'antiviewonce', 'antibot', 'antiforward', 'antitagadmins', 'antidelete',
-      'antideletestatus', 'antidemote', 'antipromote',
-      'menu', 'help', 'sticker', 'save', 'chatbot', 'mygroups',
-      'ttt2', 'tod', 'snake',
-      // the owner's own additions
-      'add', 'all', 'antiall', 'tagall', 'autoreact', 'autorecording',
-      'autorecordtype', 'autotyping', 'mode', 'setbotpp', 'setfont', 'setprefix',
-      // their vv.js registers under this name, with vv/vv2 as aliases
-      'viewonce',
-      'deploy',
-      'disable',
-      'enable',
-      // the ..wdp mentor port: group administration
-      'kick', 'promote', 'demote', 'hidetag', 'grouplink', 'revoke',
-      'setgname', 'setgdesc', 'staff',
-      // the ..wdp mentor port: warnings & mutes (backed by the JSON store)
-      'warn', 'resetwarn', 'mute', 'unmute',
-      // the ..wdp mentor port: welcome / goodbye greetings
-      'welcome', 'setwelcome', 'goodbye', 'setgoodbye',
-      // the ..wdp mentor port: batch B (groups, join requests, activity)
-      'join', 'leave', 'block', 'unblock',
-      'kickinactive', 'kickactive', 'approve', 'reject',
-      'groupinfo', 'poll', 'myactivity', 'autosticker',
-      // authored for Jtest (no ..wdp source existed): snipe reads antidelete's
-      // delete record; nsfw/detect are link gates wired into handler.js
+
+    // The roster is pinned by COUNT rather than by an exhaustive name list.
+    // It held 53 names when it was written and human-reviewable; the ..wdp
+    // parity port took it past 160 across 21 categories, and a 169-line
+    // literal stops being reviewable while still failing on every legitimate
+    // addition. The count keeps the useful half of the old assertion — a
+    // surprise command still fails here — and the sampling below keeps the
+    // other half, that the surface is the one we think it is.
+    //
+    // If you add a command: update this number deliberately.
+    assert.equal(table.commandCount, 169, 'command roster size changed');
+
+    // A representative from each wave of the codebase, so a wholesale
+    // regression (a broken require, a bad path) is caught by name too.
+    for (const name of [
+      // the original core
+      'ping', 'uptime', 'menu', 'help', 'sticker', 'chatbot',
+      // the restored June X nine + owner additions
+      'viewonce', 'add', 'all', 'antiall', 'tagall', 'mode', 'setprefix',
+      // ..wdp port, wave 1: admin suite, warnings, greetings
+      'kick', 'promote', 'demote', 'hidetag', 'warn', 'mute', 'welcome', 'setgoodbye',
+      // ..wdp port, wave 2: batch B
+      'join', 'leave', 'block', 'approve', 'groupinfo', 'poll', 'myactivity', 'autosticker',
+      // authored here (no ..wdp source existed)
       'snipe', 'nsfw', 'detect',
-    ].sort();
-    const actual = [...new Set([...table.values()].map((c) => c.name))].sort();
-    assert.deepEqual(actual, expected);
+      // ..wdp port, wave 3: the parity categories
+      'alive', 'botinfo', 'antilink', 'antibadword', 'setmenu', 'broadcast',
+      'play', 'song', 'video', 'yts', 'lyrics', 'fancytext',
+    ]) {
+      assert.ok(table.get(name), `${name} must be loaded`);
+    }
   });
 
   test('commands are found recursively, not just at the top level', () => {

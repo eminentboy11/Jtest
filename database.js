@@ -847,6 +847,286 @@ process.on('exit', () => {
   try { flush(); } catch (_) {}
 });
 
+// ════════════════════════════════════════════════════════════════════════════
+//  ..wdp-parity APIs
+//
+//  The ported June X commands were written against ..wdp's SQLite store. Every
+//  function below reimplements one of those calls on this JSON store so the
+//  commands run unchanged — without importing better-sqlite3/mongodb/pg/sql.js,
+//  which this edition deliberately dropped (see the header for why).
+//
+//  Semantics are copied from ..wdp (normalisation, defaults, clamping) so a
+//  command behaves the same here as it does there. Storage choice differs:
+//  configuration lives in bot settings, unbounded-growing history lives in a KV
+//  namespace (which setKV already caps per namespace).
+// ════════════════════════════════════════════════════════════════════════════
+
+// ── Menu presentation ──────────────────────────────────────────────────────
+// ..wdp keeps menuStyle/showX in flat settings; updateMenuSettings is the
+// supported writer and normalises the style into a known value.
+const MENU_STYLE_VALUES = Object.freeze(['1', '2', '3', '4', '5', '6']);
+const MENU_SETTINGS_DEFAULTS = Object.freeze({
+  menuStyle: '5',
+  showMemory: true,
+  showUptime: true,
+  showPluginCount: true,
+  showProgressBar: true,
+});
+
+const normaliseMenuStyle = (value) => {
+  const style = String(value ?? '').trim();
+  return MENU_STYLE_VALUES.includes(style) ? style : MENU_SETTINGS_DEFAULTS.menuStyle;
+};
+
+const menuBoolean = (value, fallback) => (typeof value === 'boolean' ? value : fallback);
+
+/** Bot-level menu preferences, merged over the defaults. */
+const getMenuPresentation = () => {
+  const s = getBotSetting('menuPresentation') || {};
+  return {
+    menuStyle: normaliseMenuStyle(s.menuStyle),
+    showMemory: menuBoolean(s.showMemory, MENU_SETTINGS_DEFAULTS.showMemory),
+    showUptime: menuBoolean(s.showUptime, MENU_SETTINGS_DEFAULTS.showUptime),
+    showPluginCount: menuBoolean(s.showPluginCount, MENU_SETTINGS_DEFAULTS.showPluginCount),
+    showProgressBar: menuBoolean(s.showProgressBar, MENU_SETTINGS_DEFAULTS.showProgressBar),
+  };
+};
+
+const updateMenuSettings = (updates = {}) => {
+  const current = getMenuPresentation();
+  const has = (key) => Object.prototype.hasOwnProperty.call(updates, key);
+  const next = {
+    menuStyle: has('menuStyle') ? normaliseMenuStyle(updates.menuStyle) : current.menuStyle,
+    showMemory: has('showMemory') ? menuBoolean(updates.showMemory, current.showMemory) : current.showMemory,
+    showUptime: has('showUptime') ? menuBoolean(updates.showUptime, current.showUptime) : current.showUptime,
+    showPluginCount: has('showPluginCount')
+      ? menuBoolean(updates.showPluginCount, current.showPluginCount)
+      : current.showPluginCount,
+    showProgressBar: has('showProgressBar')
+      ? menuBoolean(updates.showProgressBar, current.showProgressBar)
+      : current.showProgressBar,
+  };
+  setBotSetting('menuPresentation', next);
+  return next;
+};
+
+const getMenuImageSettings = () => {
+  const imageData = getBotSetting('menuImageData');
+  const custom = getBotSetting('menuImageCustom') === true;
+  const valid = typeof imageData === 'string' && imageData.trim().length > 0;
+  return { custom: custom && valid, imageData: custom && valid ? imageData : null };
+};
+
+const setMenuImageData = (imageData) => {
+  const value = typeof imageData === 'string' && imageData.trim().length > 0 ? imageData : null;
+  updateBotSettings({ menuImageCustom: Boolean(value), menuImageData: value });
+  return Boolean(value);
+};
+
+const clearMenuImageData = () => {
+  updateBotSettings({ menuImageCustom: false, menuImageData: null });
+  return true;
+};
+
+// ── Auto-download status ───────────────────────────────────────────────────
+const AUTO_DOWNLOAD_STATUS_TYPES = Object.freeze([
+  'image', 'video', 'audio', 'document', 'sticker', 'text',
+]);
+const AUTO_DOWNLOAD_STATUS_DEFAULTS = Object.freeze({
+  enabled: false,
+  mode: 'private',
+  publicJid: '',
+  ownerJid: '',
+  downloadTypes: AUTO_DOWNLOAD_STATUS_TYPES,
+  excludedContacts: [],
+  skipOwnerStatus: true,
+  totalDownloaded: 0,
+});
+
+const STATUS_DOWNLOADS_NS = 'statusDownloads';
+const STATUS_DOWNLOAD_HISTORY_MAX = 500;
+
+const adBool = (v, fallback) => (typeof v === 'boolean' ? v : fallback);
+const adMode = (v) => (['private', 'public'].includes(String(v || '').trim().toLowerCase())
+  ? String(v).trim().toLowerCase()
+  : AUTO_DOWNLOAD_STATUS_DEFAULTS.mode);
+const adTypes = (v) => {
+  if (!Array.isArray(v)) return [...AUTO_DOWNLOAD_STATUS_TYPES];
+  return [...new Set(v
+    .map((t) => String(t || '').trim().toLowerCase())
+    .filter((t) => AUTO_DOWNLOAD_STATUS_TYPES.includes(t)))];
+};
+const adContacts = (v) => {
+  if (!Array.isArray(v)) return [];
+  return [...new Set(v.map((c) => String(c || '').replace(/\D/g, '')).filter(Boolean))];
+};
+const adCount = (v) => {
+  const n = Number(v);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+};
+
+/** Coerce an arbitrary blob into a valid settings object (mirrors ..wdp). */
+const normaliseAutoDownloadStatusSettings = (value) => {
+  const s = value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+  return {
+    enabled: adBool(s.enabled, AUTO_DOWNLOAD_STATUS_DEFAULTS.enabled),
+    mode: adMode(s.mode),
+    publicJid: typeof s.publicJid === 'string' ? s.publicJid.trim() : '',
+    ownerJid: typeof s.ownerJid === 'string' ? s.ownerJid.trim() : '',
+    // An intentionally empty array means "download no content types".
+    downloadTypes: Array.isArray(s.downloadTypes)
+      ? adTypes(s.downloadTypes)
+      : [...AUTO_DOWNLOAD_STATUS_TYPES],
+    excludedContacts: adContacts(s.excludedContacts),
+    skipOwnerStatus: adBool(s.skipOwnerStatus, AUTO_DOWNLOAD_STATUS_DEFAULTS.skipOwnerStatus),
+    totalDownloaded: adCount(s.totalDownloaded),
+  };
+};
+
+const getAutoDownloadStatusSettings = () =>
+  normaliseAutoDownloadStatusSettings(getBotSetting('autoDownloadStatus'));
+
+const setAutoDownloadStatusSettings = (updates = {}) => {
+  const current = getAutoDownloadStatusSettings();
+  const patch = updates && typeof updates === 'object' && !Array.isArray(updates) ? updates : {};
+  const next = normaliseAutoDownloadStatusSettings({ ...current, ...patch });
+  setBotSetting('autoDownloadStatus', next);
+  return next;
+};
+
+const statusDownloadKey = (statusId) => `sd:${String(statusId)}`;
+
+const hasStatusBeenDownloaded = (statusId) => {
+  if (!statusId) return false;
+  return getKV(STATUS_DOWNLOADS_NS, statusDownloadKey(statusId)) !== null;
+};
+
+const markStatusDownloaded = (statusId, metadata = {}) => {
+  if (!statusId) return false;
+  const record = {
+    statusId: String(statusId),
+    senderId: String(metadata.senderId || ''),
+    mediaType: String(metadata.mediaType || 'unknown'),
+    downloadedAt: Number(metadata.downloadedAt || Date.now()),
+    destinationJid: String(metadata.destinationJid || ''),
+  };
+  // setKV already trims the oldest keys per namespace, which is exactly the
+  // history cap ..wdp enforces with deleteOldestStatusDownloads.
+  setKV(STATUS_DOWNLOADS_NS, statusDownloadKey(statusId), record);
+  return true;
+};
+
+const incrementStatusDownloadCount = () => {
+  const next = setAutoDownloadStatusSettings({
+    totalDownloaded: getAutoDownloadStatusSettings().totalDownloaded + 1,
+  });
+  return next.totalDownloaded;
+};
+
+/** Newest-first history, capped like ..wdp's getStatusDownloadLogs. */
+const getStatusDownloadLogs = (limit = 100) => {
+  const safe = Math.max(1, Math.min(500, Math.floor(Number(limit) || 100)));
+  return Object.values(getAllKV(STATUS_DOWNLOADS_NS))
+    .filter((r) => r && typeof r === 'object')
+    .sort((a, b) => Number(b.downloadedAt || 0) - Number(a.downloadedAt || 0))
+    .slice(0, safe);
+};
+
+const clearStatusDownloadHistory = () => {
+  const all = getAllKV(STATUS_DOWNLOADS_NS);
+  for (const key of Object.keys(all)) delKV(STATUS_DOWNLOADS_NS, key);
+  return Object.keys(all).length;
+};
+
+// ── Bad words ──────────────────────────────────────────────────────────────
+// Per-group, stored on the group's own settings patch. ..wdp's DEFAULT_GROUP_
+// SETTINGS declares `badwords: []` but never shipped these three helpers, so
+// .antibadword threw on first use there; this is the missing half.
+const WORD_MAX = 64;
+
+const normaliseWord = (word) => String(word ?? '').trim().toLowerCase().slice(0, WORD_MAX);
+
+const getBadWords = (groupId) => {
+  const list = getGroupSettings(groupId).badwords;
+  return Array.isArray(list) ? list.filter((w) => typeof w === 'string') : [];
+};
+
+const addBadWord = (groupId, word) => {
+  const w = normaliseWord(word);
+  if (!w) return false;
+  const words = getBadWords(groupId);
+  if (words.includes(w)) return false;
+  updateGroupSettings(groupId, { badwords: [...words, w] });
+  return true;
+};
+
+const removeBadWord = (groupId, word) => {
+  const w = normaliseWord(word);
+  const words = getBadWords(groupId);
+  if (!w || !words.includes(w)) return false;
+  updateGroupSettings(groupId, { badwords: words.filter((x) => x !== w) });
+  return true;
+};
+
+// ── Anti-edit mode ─────────────────────────────────────────────────────────
+const ANTIEDIT_MODES = ['off', 'chat', 'private'];
+
+const setAntieditMode = (mode) => {
+  const normalised = String(mode || '').trim().toLowerCase();
+  if (!ANTIEDIT_MODES.includes(normalised)) throw new Error('Invalid Anti-Edit mode');
+  setBotSetting('antieditMode', normalised);
+  return normalised;
+};
+
+// ── Status automation settings (autostatusview/react/emoji) ────────────────
+const loadSettings = () => ({
+  enabled: Boolean(getBotSetting('autoStatusView') || false),
+  react: Boolean(getBotSetting('autoStatusReact') || false),
+  emoji: getBotSetting('autoStatusEmoji') || '💙',
+  emojiPool: getBotSetting('autoStatusEmojiPool') || [],
+  randomEmoji: Boolean(getBotSetting('autoStatusRandomEmoji') || false),
+});
+
+const saveSettings = (settings = {}) => {
+  updateBotSettings({
+    autoStatusView: !!settings.enabled,
+    autoStatusReact: !!settings.react,
+    autoStatusEmoji: settings.emoji || '',
+    autoStatusEmojiPool: settings.emojiPool || [],
+    autoStatusRandomEmoji: !!settings.randomEmoji,
+  });
+  return loadSettings();
+};
+
+// ── Health / maintenance ───────────────────────────────────────────────────
+/**
+ * JSON-store equivalent of ..wdp's getDatabaseHealth. Reports the shape botinfo
+ * renders; the SQLite-specific fields (integrity check, backup file) have no
+ * counterpart here and are reported honestly rather than faked.
+ */
+const getDatabaseHealth = () => {
+  let sizeBytes = 0;
+  try { sizeBytes = fs.statSync(filePath(currentBotId())).size || 0; } catch (_) {}
+  const stats = lruStats();
+  return {
+    driver: 'json',
+    file: filePath(currentBotId()),
+    sizeBytes,
+    botsResident: stats?.resident ?? null,
+    botsKnown: listBotIds().length,
+    integrity: { ok: true, result: 'not-applicable (json store)', checkedAt: null },
+    backup: { exists: false, sizeBytes: 0, valid: false },
+    dirty: false,
+  };
+};
+
+/** Drop this bot's stored data, keeping the process and other bots intact. */
+const resetDatabase = () => {
+  const id = currentBotId();
+  resetBotData(id);
+  return true;
+};
+
 module.exports = {
   ready,
 
@@ -892,8 +1172,20 @@ module.exports = {
   // antidelete
   getAntideleteMode, setAntideleteMode, ANTIDELETE_MODES,
   saveAntideleteMessage, getAntideleteMessage, deleteAntideleteMessage,
-  getAntieditMode, isAntideleteStatusEnabled, setAntideleteStatusEnabled,
+  getAntieditMode, setAntieditMode, ANTIEDIT_MODES,
+  isAntideleteStatusEnabled, setAntideleteStatusEnabled,
   getMenuSettings, setMenuSettings,
+
+  // ..wdp-parity APIs (reimplemented on the JSON store — no SQLite/Mongo/pg)
+  MENU_STYLE_VALUES, updateMenuSettings, getMenuImageSettings,
+  setMenuImageData, clearMenuImageData,
+  AUTO_DOWNLOAD_STATUS_TYPES, AUTO_DOWNLOAD_STATUS_DEFAULTS,
+  getAutoDownloadStatusSettings, setAutoDownloadStatusSettings,
+  hasStatusBeenDownloaded, markStatusDownloaded, incrementStatusDownloadCount,
+  getStatusDownloadLogs, clearStatusDownloadHistory,
+  getBadWords, addBadWord, removeBadWord,
+  loadSettings, saveSettings,
+  getDatabaseHealth, resetDatabase,
 
   // constants
   MESSAGES, SOCIAL, API_KEYS, ANTICALL_PRESETS, VERSION, SESSION_NAME,

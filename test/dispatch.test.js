@@ -106,10 +106,12 @@ describe('the shipped commands', () => {
   });
 });
 
-describe('removed commands fall through silently', () => {
-  const gone = ['.play', '.fancy', '.list', '.antilink', '.antibadword', '.groupstats',
-    '.logomenu', '.docconvert', '.tictactoe', '.bomb', '.antiedit', '.anticall',
-    '.antibug', '.autodownloadstatus'];
+describe('genuinely absent commands fall through silently', () => {
+  // This list used to be long: it asserted the whole June X surface was absent.
+  // The ..wdp parity port brought most of it back, so only the handful that
+  // still has no source (or needs a dropped native dep) remains. Each name here
+  // should still be silent rather than erroring.
+  const gone = ['.list', '.logomenu', '.docconvert', '.tictactoe', '.bomb'];
 
   for (const name of gone) {
     test(`${name} produces no crash and no user-visible output`, async () => {
@@ -196,7 +198,9 @@ describe('the restored commands respond', () => {
     assert.ok(text.includes('TESTPLATFORM'),
       'menu must surface global.platform, not its own detection');
     assert.ok(text.includes('ping'), 'menu must list loaded commands');
-    assert.ok(!text.includes('.fancy'), 'menu must not advertise absent commands');
+    // .fancy was absent before the ..wdp port and this asserted it was NOT
+    // advertised. fancytext.js now provides it, so the menu should list it.
+    assert.ok(text.includes('fancy'), 'menu must advertise the ported commands');
     delete global.platform;
   });
 
