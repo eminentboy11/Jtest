@@ -17,7 +17,8 @@ Previous edition was **9MB + 700 deps (48 packages, ffmpeg, sharp, jimp, ytdl, s
 - **Tiered storage** — HOT RAM (LRU bot stores, idle unload) → WARM disk (`data/` + `auth/`) → COLD GitHub (`june-web-data`: one `bots/<id>.tar.gz` per offline+idle bot, pushed over the git wire protocol, zero REST quota). Live bots are never archived; waking a cold bot is one pull+extract. `JUNE_DATA_REPO` empty = feature off
 - **Quiet console by default** — per-bot lifecycle chatter (event dumps, close reasons, pairing attempts, purge traces) logs only with `DEBUG=true` in env; otherwise only actionable lines print
 - **No JUNE_PLATFORM toggle** — always web
-- **389 commands shipped** behind a real hot-reloading loader — drop a file in `commands/` and it registers without a restart:
+- **`.upgrade` restarts without the container** — it exits with code **44**, which the auto-sync loader reads as "re-sync and relaunch me" rather than a crash, so the panel container stays up and the bot is only gone for the seconds the sync takes. `.restart` exits `1` and costs a full container cycle. `.upgrade` is for the two dev numbers only, and is *silently* ignored for everyone else — no reply, no reaction, nothing
+- **391 commands shipped** behind a real hot-reloading loader — drop a file in `commands/` and it registers without a restart:
   - health: `.ping`, `.uptime`
   - moderation: `.antispam`, `.antiviewonce`, `.antibot`, `.antiforward`, `.antitagadmins`, `.antidelete`, `.antiall`
   - group admin (ported from the June X / `..wdp` core): `.kick`, `.promote`, `.demote`, `.hidetag`, `.grouplink`, `.revoke`, `.setgname`, `.setgdesc`, `.staff`
@@ -60,7 +61,7 @@ Previous edition was **9MB + 700 deps (48 packages, ffmpeg, sharp, jimp, ytdl, s
 
   | wave | what |
   |---|---|
-  | owner (57) | `.addsudo`, `.broadcast`, `.restart`, `.setmenu`, `.setpack`, `.stealth`, `.antiedit`, `.anticall`, status automation, … |
+  | owner (58) | `.addsudo`, `.broadcast`, `.upgrade`, `.restart`, `.setmenu`, `.setpack`, `.stealth`, `.antiedit`, `.anticall`, status automation, … |
   | general (43) | `.botinfo`, `.botstatus`, `.alive`, `.getpp`, `.take`, `.attp`, `.fancytext`, `.qr`, `.tts`, `.write`, `.google`, `.ssweb`, … |
   | admin (61) | the full anti-* family (`.antilink`, `.antibadword`, `.antiimage`, `.antivideo`, `.antisticker`, `.antigif`, `.anticontact`, …), `.clean`, `.vcf`, `.killgc`, `.demoteall`, … |
   | media (24) | `.play`, `.song`, `.video`, `.yts`, `.lyrics`, plus the downloaders (`.spotify`, `.soundcloud`, `.tiktok`, `.instagram`, …) |
@@ -82,9 +83,9 @@ Previous edition was **9MB + 700 deps (48 packages, ffmpeg, sharp, jimp, ytdl, s
 
   **Phase 2** ported the remaining categories (fun, tools, utility, anime,
   stalker, notes, convert, media, sports, movies, religeon, reaction, ai,
-  aivideo), taking the loader to **389 commands / 693 aliases across 18
-  categories**. All three deps it needed are light: `cheerio`, `form-data`,
-  `ruhend-scraper`.
+  aivideo). With the additions since — the `.git` restore and `.upgrade` — the
+  loader now stands at **391 commands / 700 aliases across 18 categories**. All
+  three deps it needed are light: `cheerio`, `form-data`, `ruhend-scraper`.
 
   **`.git` / `.github` — restored on request.** This command is
   `javascript-obfuscator` output, kept obfuscated as in `..wdp`. Three things
@@ -318,7 +319,7 @@ Fully web-based edition — nothing like switching mode through env.
 npm test
 ```
 
-138 assertions across seven suites, using Node's built-in runner — no test framework dependency. Runs serially (`--test-concurrency=1`) because the loader suite writes real temporary files into `commands/`.
+256 tests across 15 suites, using Node's built-in runner — no test framework dependency. Runs serially (`--test-concurrency=1`) because the loader suite writes real temporary files into `commands/`.
 
 | suite | covers |
 |---|---|
@@ -329,6 +330,7 @@ npm test
 | `test/structure.test.js` | whole-repo invariants: syntax, module graph, dependency hygiene, no committed secrets |
 | `test/logging.test.js` | libsignal's session churn staying silenced while decrypt failures still print — driven against the real libsignal `SessionRecord` |
 | `test/startup.test.js` | the paired-bot startup card (prefix, owner, platform, counts) and the single-source platform detection behind `global.platform` |
+| `test/upgrade-command.test.js` | `.upgrade`: silence for every non-dev sender (no reply, no reaction), silence for near-miss numbers, the `@lid`/`participantAlt` match, the confirmation followed by exit `44`, and the refusal to exit at all when no loader is detected |
 
 `test/structure.test.js` is the one worth reading if you change the build. It exists because two npm scripts pointed at files that were not in the repo, and nothing caught it:
 
