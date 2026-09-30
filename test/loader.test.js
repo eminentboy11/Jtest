@@ -90,6 +90,13 @@ describe('discovery', () => {
       'warn', 'resetwarn', 'mute', 'unmute',
       // the ..wdp mentor port: welcome / goodbye greetings
       'welcome', 'setwelcome', 'goodbye', 'setgoodbye',
+      // the ..wdp mentor port: batch B (groups, join requests, activity)
+      'join', 'leave', 'block', 'unblock',
+      'kickinactive', 'kickactive', 'approve', 'reject',
+      'groupinfo', 'poll', 'myactivity', 'autosticker',
+      // authored for Jtest (no ..wdp source existed): snipe reads antidelete's
+      // delete record; nsfw/detect are link gates wired into handler.js
+      'snipe', 'nsfw', 'detect',
     ].sort();
     const actual = [...new Set([...table.values()].map((c) => c.name))].sort();
     assert.deepEqual(actual, expected);

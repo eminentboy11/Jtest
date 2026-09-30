@@ -5,6 +5,7 @@
 const database = require('./database');
 const { loadCommands, watchCommands, swapInto } = require('./utils/commandLoader');
 const { resolveQuoted, getMentionedJids } = require('./utils/msgTools');
+const { findNsfwLink, findSuspiciousLink, describeReason } = require('./utils/contentGates');
 // ── Command Toggle — runtime disable/enable (merged in from utils/commandToggle.js) ──
 // Backed by SQLite bot_settings (key 'disabledCommands', JSON array of canonical
 // names). Enforcement lives in the two dispatch gates below; owner & sudo always
@@ -977,10 +978,23 @@ const handleMessage = async (sock, msg) => {
                          content.viewOnceMessage?.message ||
                          content.ephemeralMessage?.message || {};
         const _has = (k) => !!(content[k] || _voInner[k]);
+
+        // Link classification for the nsfw/detect gates. Computed once here so
+        // the notice below can name the specific reason it was flagged.
+        const _nsfwHit = findNsfwLink(body);
+        const _scamHit = findSuspiciousLink(body);
+
         let violation = null;
         if (groupSettings.antilink &&
             /(?:https?:\/\/|www\.)\S+|chat\.whatsapp\.com\/\S+|t\.me\/\S+/i.test(body || '')) {
           violation = '🔗 Anti-Link';
+        } else if (groupSettings.nsfw !== true && _nsfwHit) {
+          // nsfw defaults to false, so adult links are blocked unless an admin
+          // has explicitly turned the filter ON for this group.
+          violation = '🔞 NSFW Link';
+        } else if (groupSettings.detect === true && _scamHit) {
+          // detect defaults to false, so scanning is opt-in per group.
+          violation = `🕵️ Suspicious Link — ${describeReason(_scamHit.reason)}`;
         } else if (groupSettings.antisticker && _has('stickerMessage')) {
           violation = '🎭 Anti-Sticker';
         } else if (groupSettings.antiimage && _has('imageMessage')) {
