@@ -361,12 +361,37 @@ describe('removed surface', () => {
     assert.equal(database._db, undefined);
   });
 
-  test('the old remote layer is gone', () => {
-    assert.ok(!fs.existsSync(path.join(H.REPO, 'utils/juneDb')));
+  test('no database engine is declared — the JSON store is the only backend', () => {
+    // This used to also assert utils/juneDb was absent. The ..wdp parity port
+    // brought back utils/juneDb/sessionServer.js, which is a pure crypto/
+    // transport helper with no SQLite in it, so the meaningful invariant is
+    // that no SQLite/Mongo/pg driver is declared and nothing in the tree
+    // reaches for one.
     const pkg = JSON.parse(fs.readFileSync(path.join(H.REPO, 'package.json'), 'utf8'));
     for (const d of ['better-sqlite3', 'sql.js', 'pg', 'mongodb']) {
       assert.equal(pkg.dependencies[d], undefined, `${d} should not be declared`);
     }
+  });
+
+  test('nothing in the tree requires a SQLite/Mongo/pg driver', () => {
+    const offenders = [];
+    const SKIP = new Set(['node_modules', '.git', 'test', 'data', 'auth', '.local', '.agents']);
+    (function walk(dir) {
+      for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+        if (SKIP.has(e.name)) continue;
+        const p = path.join(dir, e.name);
+        if (e.isDirectory()) walk(p);
+        else if (e.name.endsWith('.js')) {
+          const src = fs.readFileSync(p, 'utf8');
+          for (const d of ['better-sqlite3', 'sql.js', '\'pg\'', 'mongodb']) {
+            if (src.includes(`require('${d}')`) || src.includes(`require("${d}")`)) {
+              offenders.push(`${path.relative(H.REPO, p)}: ${d}`);
+            }
+          }
+        }
+      }
+    })(H.REPO);
+    assert.deepEqual(offenders, [], offenders.join('\n'));
   });
 
   test('no hardcoded credentials remain in the database module', () => {

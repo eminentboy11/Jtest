@@ -310,9 +310,21 @@ describe('secrets', () => {
     assert.deepEqual(hits, []);
   });
 
-  test('the deleted remote database layer is still gone', () => {
-    assert.ok(!fs.existsSync(path.join(REPO, 'utils', 'juneDb')));
-    const hits = repoFiles().filter((f) => /juneDb|better-sqlite3|sql\.js/.test(read(f))).map(rel);
+  test('no SQLite/Mongo/pg driver is reachable from live code', () => {
+    // This used to assert utils/juneDb did not exist at all. The ..wdp parity
+    // port restored utils/juneDb/sessionServer.js — a pure crypto/transport
+    // helper that contains no database code — so the invariant that matters is
+    // that nothing anywhere reaches for a real database driver, which is what
+    // this edition replaced with the per-bot JSON store.
+    const hits = [];
+    for (const f of repoFiles()) {
+      const src = stripComments(read(f));
+      for (const driver of ['better-sqlite3', 'sql.js', 'mongodb', 'pg']) {
+        if (new RegExp(`require\\(\\s*['"]${driver.replace('.', '\\.')}['"]`).test(src)) {
+          hits.push(`${rel(f)}: ${driver}`);
+        }
+      }
+    }
     assert.deepEqual(hits, []);
   });
 

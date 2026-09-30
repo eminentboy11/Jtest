@@ -17,7 +17,7 @@ Previous edition was **9MB + 700 deps (48 packages, ffmpeg, sharp, jimp, ytdl, s
 - **Tiered storage** — HOT RAM (LRU bot stores, idle unload) → WARM disk (`data/` + `auth/`) → COLD GitHub (`june-web-data`: one `bots/<id>.tar.gz` per offline+idle bot, pushed over the git wire protocol, zero REST quota). Live bots are never archived; waking a cold bot is one pull+extract. `JUNE_DATA_REPO` empty = feature off
 - **Quiet console by default** — per-bot lifecycle chatter (event dumps, close reasons, pairing attempts, purge traces) logs only with `DEBUG=true` in env; otherwise only actionable lines print
 - **No JUNE_PLATFORM toggle** — always web
-- **68 commands shipped** behind a real hot-reloading loader — drop a file in `commands/` and it registers without a restart:
+- **169 commands shipped** behind a real hot-reloading loader — drop a file in `commands/` and it registers without a restart:
   - health: `.ping`, `.uptime`
   - moderation: `.antispam`, `.antiviewonce`, `.antibot`, `.antiforward`, `.antitagadmins`, `.antidelete`, `.antiall`
   - group admin (ported from the June X / `..wdp` core): `.kick`, `.promote`, `.demote`, `.hidetag`, `.grouplink`, `.revoke`, `.setgname`, `.setgdesc`, `.staff`
@@ -52,9 +52,39 @@ Previous edition was **9MB + 700 deps (48 packages, ffmpeg, sharp, jimp, ytdl, s
   antidelete is what captures, `.snipe` needs it enabled and says so plainly
   rather than reporting an empty chat.
 
-  This edition is deliberately a light gateway plus a core command set. The full
-  300-command June X experience is a different deployment: if a user wants more
-  commands than this, they deploy the main June X bot instead.
+  ### June X (`..wdp`) parity
+
+  This edition is being brought up to the `..wdp` June X command surface, with
+  **web edition + multi-bot** as the only intended differences. Phase 1 landed
+  the high-traffic categories:
+
+  | wave | what |
+  |---|---|
+  | owner (57) | `.addsudo`, `.broadcast`, `.restart`, `.setmenu`, `.setpack`, `.stealth`, `.antiedit`, `.anticall`, status automation, … |
+  | general (43) | `.botinfo`, `.botstatus`, `.alive`, `.getpp`, `.take`, `.attp`, `.fancytext`, `.qr`, `.tts`, `.write`, `.google`, `.ssweb`, … |
+  | admin (61) | the full anti-* family (`.antilink`, `.antibadword`, `.antiimage`, `.antivideo`, `.antisticker`, `.antigif`, `.anticontact`, …), `.clean`, `.vcf`, `.killgc`, `.demoteall`, … |
+  | media (5) | `.play`, `.song`, `.video`, `.yts`, `.lyrics` |
+
+  **What parity does not mean here.** `..wdp` stores data in SQLite. This edition
+  keeps its per-bot JSON store — that decision is what makes multi-bot work (one
+  store per bot, bot resolved per call) and it is not negotiable, so every
+  `database.*` call the ported commands make was reimplemented on the JSON store
+  rather than importing a driver. `mongodb`, `pg`, `better-sqlite3` and `sql.js`
+  stay out; a test asserts no file in the tree requires them.
+
+  **Not yet ported:** the remaining 16 `..wdp` categories (design, textmaker,
+  stalker, fun, tools, aivideo, anime, convert, notes, ai, ephoto360, movies,
+  reaction, religeon, sports, utility). These are staged, not dropped.
+
+  **Two `..wdp` commands are deliberately not carried over**, because they are
+  the only two that need a dependency this edition refuses on RAM grounds:
+  `.write` (needs `sharp`) and `.groupstatus` (needs `fluent-ffmpeg`).
+  `ffmpeg-static` is likewise not shipped — `utils/ffmpegPath.js` resolves the
+  host's own ffmpeg, because the prebuilt binary would roughly halve how many
+  bots fit in a 500 MB VPS.
+
+  This edition now carries the June X command surface itself rather than a
+  reduced copy of it; the remaining gap is the 16 categories listed above.
 - **Zero unreachable code** — every `.js` file in the repo is reachable from `index.js` or `commands/`, asserted on every test run
 
 **Measured** (Node 20, `--expose-gc`). The database columns compare against a worktree of the previous commit, same script, same session:
