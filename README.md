@@ -17,7 +17,7 @@ Previous edition was **9MB + 700 deps (48 packages, ffmpeg, sharp, jimp, ytdl, s
 - **Tiered storage** — HOT RAM (LRU bot stores, idle unload) → WARM disk (`data/` + `auth/`) → COLD GitHub (`june-web-data`: one `bots/<id>.tar.gz` per offline+idle bot, pushed over the git wire protocol, zero REST quota). Live bots are never archived; waking a cold bot is one pull+extract. `JUNE_DATA_REPO` empty = feature off
 - **Quiet console by default** — per-bot lifecycle chatter (event dumps, close reasons, pairing attempts, purge traces) logs only with `DEBUG=true` in env; otherwise only actionable lines print
 - **No JUNE_PLATFORM toggle** — always web
-- **169 commands shipped** behind a real hot-reloading loader — drop a file in `commands/` and it registers without a restart:
+- **389 commands shipped** behind a real hot-reloading loader — drop a file in `commands/` and it registers without a restart:
   - health: `.ping`, `.uptime`
   - moderation: `.antispam`, `.antiviewonce`, `.antibot`, `.antiforward`, `.antitagadmins`, `.antidelete`, `.antiall`
   - group admin (ported from the June X / `..wdp` core): `.kick`, `.promote`, `.demote`, `.hidetag`, `.grouplink`, `.revoke`, `.setgname`, `.setgdesc`, `.staff`
@@ -63,7 +63,15 @@ Previous edition was **9MB + 700 deps (48 packages, ffmpeg, sharp, jimp, ytdl, s
   | owner (57) | `.addsudo`, `.broadcast`, `.restart`, `.setmenu`, `.setpack`, `.stealth`, `.antiedit`, `.anticall`, status automation, … |
   | general (43) | `.botinfo`, `.botstatus`, `.alive`, `.getpp`, `.take`, `.attp`, `.fancytext`, `.qr`, `.tts`, `.write`, `.google`, `.ssweb`, … |
   | admin (61) | the full anti-* family (`.antilink`, `.antibadword`, `.antiimage`, `.antivideo`, `.antisticker`, `.antigif`, `.anticontact`, …), `.clean`, `.vcf`, `.killgc`, `.demoteall`, … |
-  | media (5) | `.play`, `.song`, `.video`, `.yts`, `.lyrics` |
+  | media (24) | `.play`, `.song`, `.video`, `.yts`, `.lyrics`, plus the downloaders (`.spotify`, `.soundcloud`, `.tiktok`, `.instagram`, …) |
+  | fun (18) | `.joke`, `.fact`, `.ship`, `.meme`, `.wyr`, `.paranoia`, … plus `.tetris` in games |
+  | tools (33) | `.fetch`, `.catbox`, `.llama`, `.ocr`, `.shorturl`, `.quotedinfo`, `.audioeffects`, … |
+  | utility (9) | `.calc`, `.translate`, `.weather`, `.wame`, `.pin` |
+  | anime / reaction / sports / movies / religeon / ai / stalker / notes / convert | `.waifu`, `.kiss`, `.fifaupcoming`, `.moviebox`, `.bible`, `.chatgpt`, `.gitstalk`, `.addnote`, `.togif`, … |
+
+  Several files register many commands from one module (`.reactions` alone is 58,
+  `.sports` 19, `.ai` 14, `.movies` 14), which is why the file count is lower
+  than the command count.
 
   **What parity does not mean here.** `..wdp` stores data in SQLite. This edition
   keeps its per-bot JSON store — that decision is what makes multi-bot work (one
@@ -72,9 +80,25 @@ Previous edition was **9MB + 700 deps (48 packages, ffmpeg, sharp, jimp, ytdl, s
   rather than importing a driver. `mongodb`, `pg`, `better-sqlite3` and `sql.js`
   stay out; a test asserts no file in the tree requires them.
 
-  **Not yet ported:** the remaining 16 `..wdp` categories (design, textmaker,
-  stalker, fun, tools, aivideo, anime, convert, notes, ai, ephoto360, movies,
-  reaction, religeon, sports, utility). These are staged, not dropped.
+  **Phase 2** ported the remaining categories (fun, tools, utility, anime,
+  stalker, notes, convert, media, sports, movies, religeon, reaction, ai,
+  aivideo), taking the loader to **389 commands / 693 aliases across 18
+  categories**. All three deps it needed are light: `cheerio`, `form-data`,
+  `ruhend-scraper`.
+
+  **Deliberately not ported** (each for a concrete reason, not oversight):
+
+  | excluded | why |
+  |---|---|
+  | `design/` (30 files: the 29 `*logo` + `.logomenu`) | every logo needs `@napi-rs/canvas`, which `..wdp` never declares — they don't load there either |
+  | `textmaker/` (18) | every file calls `mumaker.ephoto('en.ephoto360.com/…')` — this *is* the ephoto360 surface, just under a different folder |
+  | `ephoto360/` (1) | scrapes ephoto360.com |
+  | `aivideo/` (6: `ephotoVideo` + the 4 that require it + `videomenu`) | same `mumaker`/ephoto360 family; `videomenu` is a menu listing only those |
+  | `convert/docconvert` | needs `xlsx` (undeclared in `..wdp`, so broken there too) |
+  | `tools/encrypt` | needs `js-confuser` |
+  | `tools/git` | **obfuscated** `javascript-obfuscator` output, uses a computed `require()`, and hardcodes `GITHUB_USER='Vinpink2'` — a third party's repo, not this one. `.gitstalk` (stalker/) is unaffected |
+  | `general/write`, `owner/groupstatus` | need `sharp` / `fluent-ffmpeg` |
+  | `owner/viewonce`, `fun/tod`, `fun/ttt2` | byte-identical to commands already shipped (`general/vv.js`, `games/tod.js`, `games/ttt2.js`) |
 
   **Two `..wdp` commands are deliberately not carried over**, because they are
   the only two that need a dependency this edition refuses on RAM grounds:
