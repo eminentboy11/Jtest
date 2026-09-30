@@ -111,12 +111,11 @@ describe('genuinely absent commands fall through silently', () => {
   // The ..wdp parity port brought most of it back, so only the handful that
   // still has no source (or needs a dropped native dep) remains. Each name here
   // should still be silent rather than erroring.
-  // .tictactoe and .bomb came back with the phase-2 port (fun/), so the
-  // remainder is: .list (never existed in ..wdp either), and the three
-  // deliberately-not-ported names — .logomenu (design/, needs canvas on all
-  // 29 logo commands), .docconvert (convert/, needs xlsx), .git (obfuscated
-  // source pointing at a third party's repo).
-  const gone = ['.list', '.logomenu', '.docconvert', '.git'];
+  // What is still genuinely absent after both parity waves: .list (never
+  // existed in ..wdp either), .logomenu (design/, needs canvas on all 29 logo
+  // commands) and .docconvert (convert/, needs xlsx). .git came back by
+  // request — see the README for the two caveats attached to it.
+  const gone = ['.list', '.logomenu', '.docconvert'];
 
   for (const name of gone) {
     test(`${name} produces no crash and no user-visible output`, async () => {

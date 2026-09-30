@@ -86,6 +86,23 @@ Previous edition was **9MB + 700 deps (48 packages, ffmpeg, sharp, jimp, ytdl, s
   categories**. All three deps it needed are light: `cheerio`, `form-data`,
   `ruhend-scraper`.
 
+  **`.git` / `.github` — restored on request.** This command is
+  `javascript-obfuscator` output, kept obfuscated as in `..wdp`. Three things
+  are worth knowing about it:
+
+  1. **It points at a third party's repository.** It is hardcoded to
+     `https://github.com/Vinpink2/June-Ultra` — the upstream June X project, not
+     this repo. If you would rather it show your own, change `GITHUB_USER` /
+     `GITHUB_REPO` near the top of `commands/tools/git.js`.
+  2. **The three computed `require()` calls were replaced with literals**
+     (`gifted-btns`, `axios`, `path`, resolved from its own string table). The
+     file is otherwise unchanged. Without this it trips the module-graph
+     invariant in `test/structure.test.js`, which allows computed requires in
+     exactly two places.
+  3. **It references `utils/menu1.jpg`, which does not exist** — in `..wdp`
+     either. The code null-guards it, so the message just posts without the
+     header image.
+
   **Deliberately not ported** (each for a concrete reason, not oversight):
 
   | excluded | why |
@@ -96,7 +113,7 @@ Previous edition was **9MB + 700 deps (48 packages, ffmpeg, sharp, jimp, ytdl, s
   | `aivideo/` (6: `ephotoVideo` + the 4 that require it + `videomenu`) | same `mumaker`/ephoto360 family; `videomenu` is a menu listing only those |
   | `convert/docconvert` | needs `xlsx` (undeclared in `..wdp`, so broken there too) |
   | `tools/encrypt` | needs `js-confuser` |
-  | `tools/git` | **obfuscated** `javascript-obfuscator` output, uses a computed `require()`, and hardcodes `GITHUB_USER='Vinpink2'` — a third party's repo, not this one. `.gitstalk` (stalker/) is unaffected |
+  | ~~`tools/git`~~ | **restored on request** — see below |
   | `general/write`, `owner/groupstatus` | need `sharp` / `fluent-ffmpeg` |
   | `owner/viewonce`, `fun/tod`, `fun/ttt2` | byte-identical to commands already shipped (`general/vv.js`, `games/tod.js`, `games/ttt2.js`) |
 
