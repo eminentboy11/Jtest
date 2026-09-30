@@ -7,7 +7,7 @@
   "scripts": {
     "start": "node index.js",
     "dev": "nodemon index.js",
-    "test": "node --test --test-concurrency=1 test/",
+    "test": "node --test --test-concurrency=1 test/*.test.js",
     "install:no-puppeteer": "PUPPETEER_SKIP_DOWNLOAD=true PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true npm install"
   },
   "keywords": [
@@ -27,6 +27,7 @@
     "@whiskeysockets/baileys": "7.0.0-rc14",
     "awesome-phonenumber": "^7.8.0",
     "axios": "^1.19.0",
+    "chalk": "^4.1.2",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
     "node-webpmux": "^3.2.1",

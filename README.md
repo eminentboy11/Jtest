@@ -17,9 +17,12 @@ Previous edition was **9MB + 700 deps (48 packages, ffmpeg, sharp, jimp, ytdl, s
 - **Tiered storage** — HOT RAM (LRU bot stores, idle unload) → WARM disk (`data/` + `auth/`) → COLD GitHub (`june-web-data`: one `bots/<id>.tar.gz` per offline+idle bot, pushed over the git wire protocol, zero REST quota). Live bots are never archived; waking a cold bot is one pull+extract. `JUNE_DATA_REPO` empty = feature off
 - **Quiet console by default** — per-bot lifecycle chatter (event dumps, close reasons, pairing attempts, purge traces) logs only with `DEBUG=true` in env; otherwise only actionable lines print
 - **No JUNE_PLATFORM toggle** — always web
-- **30 commands shipped** behind a real hot-reloading loader — drop a file in `commands/` and it registers without a restart:
+- **53 commands shipped** behind a real hot-reloading loader — drop a file in `commands/` and it registers without a restart:
   - health: `.ping`, `.uptime`
   - moderation: `.antispam`, `.antiviewonce`, `.antibot`, `.antiforward`, `.antitagadmins`, `.antidelete`, `.antiall`
+  - group admin (ported from the June X / `..wdp` core): `.kick`, `.promote`, `.demote`, `.hidetag`, `.grouplink`, `.revoke`, `.setgname`, `.setgdesc`, `.staff`
+  - warnings & mutes: `.warn`, `.resetwarn`, `.mute`, `.unmute` (per-user mutes ride the handler's delete-on-sight list; no-target `.mute`/`.unmute` lock/reopen the group)
+  - welcome / goodbye: `.welcome`, `.setwelcome`, `.goodbye`, `.setgoodbye` (template variables `@user @group groupDesc time #memberCount botName`, optional `nopp` text-only mode)
   - utility: `.menu`, `.help`, `.sticker`, `.vv`/`.vv2`, `.save`, `.mygroups`, `.chatbot`
   - owner tools: `.mode`, `.setprefix`, `.setfont`, `.setbotpp`, `.autoreact`, `.autotyping`, `.autorecording`, `.autorecordtype`, `.add`, `.all`, `.tagall`
   - rich-app games: `.ttt2`, `.tod`, `.snake`

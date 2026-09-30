@@ -14,6 +14,7 @@ const path = require('path');
 const http = require('http');
 const express = require('express');
 const pino = require('pino');
+const chalk = require('chalk');
 
 // WDP core
 const database = require('./database');
@@ -511,13 +512,30 @@ attachPlatform(app, server).then(async () => {
         console.log('[ BOOT ] Restore failed:', e.message, e.stack?.slice(0,300));
     }
     server.listen(PORT, '0.0.0.0', () => {
-        console.log('\n' + '='.repeat(60));
-        console.log('[ JUNE X WEB ] ✅ Server started — WDP full + Web Gateway');
-        console.log('='.repeat(60));
-        console.log(`[ LISTEN ] 0.0.0.0:${PORT}`);
-        console.log(`[ GATEWAY ] Pairing UI → /  (at :${PORT}/)`);
-        console.log(`[ HEALTH ] :${PORT}/health | :${PORT}/health/details | :${PORT}/status`);
-        console.log(`[ BOTS ] ${bots.size}/${MAX_BOTS} active | WDP: ${commandCount()} commands + ${aliasCount()} aliases`);
+        // ── Chalked boot banner ──────────────────────────────────────────────
+        // Colors degrade automatically when stdout is not a TTY (chalk level 0),
+        // so log scrapers and tests still see plain, greppable text:
+        // [ JUNE X WEB ], [ LISTEN ], [ GATEWAY ], [ HEALTH ], [ BOTS ], [ DB ].
+        const bar   = chalk.cyan('━'.repeat(58));
+        const tick  = chalk.magenta('  ▸ ');
+        const label = (t) => chalk.bold.cyan(('[ ' + t + ' ]').padEnd(11));
+        const dim   = chalk.dim;
+        const val   = chalk.white;
+        const hot   = chalk.bold.yellow;
+
+        console.log('\n' + bar);
+        console.log(
+            '  ' + chalk.green('✅') + ' ' + chalk.bold.magenta('[ JUNE X WEB ]') + ' ' +
+            chalk.bold.white('Server started') + ' ' + dim('— WDP full + Web Gateway')
+        );
+        console.log(bar);
+        console.log(`${tick}${label('LISTEN')} ${chalk.bold.green(`0.0.0.0:${PORT}`)}`);
+        console.log(`${tick}${label('GATEWAY')} ${val('Pairing UI → ')}${chalk.bold.yellow('/')} ${dim(`(at :${PORT}/)`)}`);
+        console.log(`${tick}${label('HEALTH')} ${val(`:${PORT}/health`)} ${dim('|')} ${val(`:${PORT}/health/details`)} ${dim('|')} ${val(`:${PORT}/status`)}`);
+        console.log(
+            `${tick}${label('BOTS')} ${hot(`${bots.size}/${MAX_BOTS}`)} ${dim('active')} ${dim('|')} ` +
+            `${val('WDP:')} ${hot(commandCount())} ${dim('commands')} ${dim('+')} ${hot(aliasCount())} ${dim('aliases')}`
+        );
         coldArchive.configure({
             isActive: (id) => {
                 const b = bots.get(id);
@@ -525,9 +543,17 @@ attachPlatform(app, server).then(async () => {
             },
         });
         coldArchive.start();
-        if (coldArchive.enabled()) console.log(`[ COLD ] GitHub warehouse: ${coldArchive.CFG.repo} (archive after ${coldArchive.CFG.idleDays}d offline+idle)`);
-        console.log(`[ DB ] JSON store — one file per bot: ${database.getDataDir()}/<botId>.json | Shared commands: ${commandCount()}`);
-        console.log('='.repeat(60) + '\n');
+        if (coldArchive.enabled()) {
+            console.log(
+                `${tick}${label('COLD')} ${val('GitHub warehouse:')} ${chalk.bold.cyan(coldArchive.CFG.repo)} ` +
+                dim(`(archive after ${coldArchive.CFG.idleDays}d offline+idle)`)
+            );
+        }
+        console.log(
+            `${tick}${label('DB')} ${val('JSON store')} ${dim('— one file per bot:')} ` +
+            `${chalk.bold.cyan(`${database.getDataDir()}/<botId>.json`)} ${dim('| Shared commands:')} ${hot(commandCount())}`
+        );
+        console.log(bar + '\n');
     });
 }).catch(err => { console.error('[ BOOT ] Platform attach failed:', err); process.exit(1); });
 
