@@ -17,7 +17,11 @@ Previous edition was **9MB + 700 deps (48 packages, ffmpeg, sharp, jimp, ytdl, s
 - **Tiered storage** — HOT RAM (LRU bot stores, idle unload) → WARM disk (`data/` + `auth/`) → COLD GitHub (`june-web-data`: one `bots/<id>.tar.gz` per offline+idle bot, pushed over the git wire protocol, zero REST quota). Live bots are never archived; waking a cold bot is one pull+extract. `JUNE_DATA_REPO` empty = feature off
 - **Quiet console by default** — per-bot lifecycle chatter (event dumps, close reasons, pairing attempts, purge traces) logs only with `DEBUG=true` in env; otherwise only actionable lines print
 - **No JUNE_PLATFORM toggle** — always web
-- **`.upgrade` restarts without the container** — it exits with code **44**, which the auto-sync loader reads as "re-sync and relaunch me" rather than a crash, so the panel container stays up and the bot is only gone for the seconds the sync takes. `.restart` exits `1` and costs a full container cycle. `.upgrade` is for the two dev numbers only, and is *silently* ignored for everyone else — no reply, no reaction, nothing
+- **Process commands are scoped like a multi-tenant system should be** — one process runs up to 100 bots, so anything that ends a process is a dev decision and anything a tenant may do touches their own bot only:
+  - `.upgrade` — **devs only, silently ignored for everyone else.** Exits `44`, which the auto-sync loader reads as "re-sync and relaunch me": the container stays up and every bot is back in seconds with the new code on `main`
+  - `.shutdown` — **devs only, silently ignored for everyone else.** Exits `45` (stay down). Closes every bot's socket first
+  - `.restart` — that bot's **owner**, and it reboots **only the bot the message arrived on** (`sessionService.reconnect(botId)`); other tenants never notice. It cannot fetch new code — only `.upgrade` re-syncs. Non-owners are ignored silently
+  - see **Loader protocol** below for the exit codes and the loader-side contract
 - **391 commands shipped** behind a real hot-reloading loader — drop a file in `commands/` and it registers without a restart:
   - health: `.ping`, `.uptime`
   - moderation: `.antispam`, `.antiviewonce`, `.antibot`, `.antiforward`, `.antitagadmins`, `.antidelete`, `.antiall`
@@ -61,7 +65,7 @@ Previous edition was **9MB + 700 deps (48 packages, ffmpeg, sharp, jimp, ytdl, s
 
   | wave | what |
   |---|---|
-  | owner (58) | `.addsudo`, `.broadcast`, `.upgrade`, `.restart`, `.setmenu`, `.setpack`, `.stealth`, `.antiedit`, `.anticall`, status automation, … |
+  | owner (58) | `.addsudo`, `.broadcast`, `.upgrade`, `.shutdown`, `.restart`, `.setmenu`, `.setpack`, `.stealth`, `.antiedit`, `.anticall`, status automation, … |
   | general (43) | `.botinfo`, `.botstatus`, `.alive`, `.getpp`, `.take`, `.attp`, `.fancytext`, `.qr`, `.tts`, `.write`, `.google`, `.ssweb`, … |
   | admin (61) | the full anti-* family (`.antilink`, `.antibadword`, `.antiimage`, `.antivideo`, `.antisticker`, `.antigif`, `.anticontact`, …), `.clean`, `.vcf`, `.killgc`, `.demoteall`, … |
   | media (24) | `.play`, `.song`, `.video`, `.yts`, `.lyrics`, plus the downloaders (`.spotify`, `.soundcloud`, `.tiktok`, `.instagram`, …) |
@@ -189,6 +193,67 @@ CMD ["node","index.js"]
 7. GC sweeps expired slots every 60s
 
 Sessions persist in `data/platform-registry.json` + `auth/`. No env editing.
+
+## Loader Protocol
+
+Jtest does not supervise itself. The bot is launched by an external auto-sync
+loader (the `..wdp` bootloader), and **that process owns the lifecycle**: it
+decides whether a process that just exited should come back, and how. A dying
+process cannot restart itself, so Jtest only speaks the protocol on the way out
+— two exit codes, defined in `platform/loader.js`:
+
+| exit | meaning | sent by |
+|---|---|---|
+| `44` | **re-sync and relaunch me.** The loader pulls `main`, re-extracts, and starts the bot again. The panel container never restarts | `.upgrade` |
+| `45` | **do not relaunch me.** Shut down and stay down | `.shutdown` |
+| any other | an ordinary exit; treat it as one | crashes |
+
+The graceful close (socket teardown, ordering the JSON flush) and the re-kill
+chain live on the **loader's** side of this contract. `utils/shutdown.js` —
+which used to hold them — was deleted, along with its
+`database/shutdown-state.json` state file. It was the right idea in the wrong
+process: it had the bot kill *itself* three boots in a row to outlast a
+supervisor, but a bot that is exiting cannot guarantee it is the one that comes
+back next.
+
+### Loader side (paste into the loader)
+
+```js
+// 1. after the child exits
+const code = status;                       // from the 'exit' listener
+if (code === 44) return syncAndRelaunch(); // pull main + relaunch — unchanged
+if (code === 45) {                         // stay down
+  // re-arm the chain from HERE, where a process is still alive to do it
+  const marker = path.join(botDir, 'database', 'shutdown-state.json');
+  fs.mkdirSync(path.dirname(marker), { recursive: true });
+  const left = Number(readJson(marker)?.killsLeft ?? 3) - 1;
+  if (left > 0) fs.writeFileSync(marker, JSON.stringify({ killsLeft: left, at: Date.now() }));
+  else fs.rmSync(marker, { force: true });
+  process.exit(1);                         // the panel may restart us...
+}
+
+// 2. before launching the bot on EVERY start
+const marker = path.join(botDir, 'database', 'shutdown-state.json');
+if (fs.existsSync(marker)) {
+  const left = Number(readJson(marker)?.killsLeft ?? 3) - 1;
+  if (left > 0) {
+    fs.writeFileSync(marker, JSON.stringify({ killsLeft: left, at: Date.now() }));
+    console.log(`[SHUTDOWN] chain kill — ${left} left`);
+    process.exit(1);                       // ...and we kill ourselves again
+  }
+  fs.rmSync(marker, { force: true });      // chain spent: boot normally
+}
+```
+
+`database/` is in the loader's `SKIP_DIRS`, so the marker survives a mirror-clean
+— which is the property the original chain depended on too. Three boots, then
+the bot stays up: the same behaviour as before, just enforced by the process
+that is still running.
+
+Set `JUNE_LOADER=1` in the loader's environment for the bot. `.upgrade` refuses
+to exit `44` when it cannot detect a loader, because without one the code would
+just take the bot down with nothing to bring it back.
+
 
 ## Data Storage
 
@@ -319,7 +384,7 @@ Fully web-based edition — nothing like switching mode through env.
 npm test
 ```
 
-256 tests across 15 suites, using Node's built-in runner — no test framework dependency. Runs serially (`--test-concurrency=1`) because the loader suite writes real temporary files into `commands/`.
+265 tests across 15 suites, using Node's built-in runner — no test framework dependency. Runs serially (`--test-concurrency=1`) because the loader suite writes real temporary files into `commands/`.
 
 | suite | covers |
 |---|---|
@@ -330,7 +395,7 @@ npm test
 | `test/structure.test.js` | whole-repo invariants: syntax, module graph, dependency hygiene, no committed secrets |
 | `test/logging.test.js` | libsignal's session churn staying silenced while decrypt failures still print — driven against the real libsignal `SessionRecord` |
 | `test/startup.test.js` | the paired-bot startup card (prefix, owner, platform, counts) and the single-source platform detection behind `global.platform` |
-| `test/upgrade-command.test.js` | `.upgrade`: silence for every non-dev sender (no reply, no reaction), silence for near-miss numbers, the `@lid`/`participantAlt` match, the confirmation followed by exit `44`, and the refusal to exit at all when no loader is detected |
+| `test/dev-commands.test.js` | the process commands: silence for every non-allowed sender (no reply, no reaction), the `@lid`/`participantAlt` match, `.upgrade` refusing to exit with no loader, `.shutdown` closing every socket then exiting `45`, and `.restart` reconnecting one bot while never calling `process.exit` |
 
 `test/structure.test.js` is the one worth reading if you change the build. It exists because two npm scripts pointed at files that were not in the repo, and nothing caught it:
 
