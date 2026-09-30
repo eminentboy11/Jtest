@@ -77,7 +77,7 @@ describe('discovery', () => {
     // other half, that the surface is the one we think it is.
     //
     // If you add a command: update this number deliberately.
-    assert.equal(table.commandCount, 389, 'command roster size changed');
+    assert.equal(table.commandCount, 390, 'command roster size changed');
 
     // A representative from each wave of the codebase, so a wholesale
     // regression (a broken require, a bad path) is caught by name too.
@@ -99,7 +99,7 @@ describe('discovery', () => {
       'tetris', 'joke', 'fact', 'ship', 'quotes',
       'calc', 'translate', 'weather', 'unpin',
       'addnote', 'mynotes', 'stalkercmd', 'waifu',
-      'tomp3', 'togif', 'chatgpt',
+      'tomp3', 'togif', 'chatgpt', 'github',
       // multi-command files: one file registers many commands
       'porn', 'xvideos', 'fifaupcoming', 'bible', 'kiss', 'moviebox',
     ]) {
