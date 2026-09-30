@@ -99,9 +99,11 @@ Previous edition was **9MB + 700 deps (48 packages, ffmpeg, sharp, jimp, ytdl, s
      file is otherwise unchanged. Without this it trips the module-graph
      invariant in `test/structure.test.js`, which allows computed requires in
      exactly two places.
-  3. **It references `utils/menu1.jpg`, which does not exist** — in `..wdp`
-     either. The code null-guards it, so the message just posts without the
-     header image.
+  3. **It loads `utils/menu1.jpg` as its header image.** `..wdp` references
+     that file but never shipped it, so the original rendered without an image.
+     Jtest now has one, drawn to match the existing menu family (360x360 JPEG,
+     same neon June X Ultra styling). It is the only generated asset in the
+     repo; the other four `menu*.jpg` are the originals.
 
   **Deliberately not ported** (each for a concrete reason, not oversight):
 
