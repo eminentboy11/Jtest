@@ -336,7 +336,13 @@ npm test
 - no file may be unreachable from `index.js` or `commands/` — walked to a fixpoint, because a file referenced only by other dead files is still dead
 - no relative `require()` may point at a missing file, except the three optional game modules resolved through `optionalModule()`
 - every `database.*` access in live code must resolve to a real export
-- no credential-shaped strings anywhere in the repo
+- no credential-shaped strings anywhere in the repo, with one narrow
+  documented exception: the shared Telegram token in
+  `commands/general/telegramsticker.js`. That token belongs to a purpose-made
+  bot (`@tokenOne222Bot`) and ships on purpose so `.tgs` works on any
+  deployment with no setup. The carve-out is one exact value in one exact file —
+  any *other* credential-shaped string still fails the test, which
+  `test/structure.test.js` also asserts.
 
 Two helpers, `test/_child-reload.js` and `test/_child-exit.js`, are spawned as separate processes to test restart persistence and the exit-flush path. They `process.exit(0)` when run with no arguments, because the Node runner treats *every* `.js` file inside a directory named `test/` as a test file and therefore executes them directly as well — without the `dataDir` their real caller passes. `test/structure.test.js` asserts that stays true.
 
