@@ -10,16 +10,17 @@ const database = require('../../database');
 
 const PACK_SIZE  = 59;
 
-// Telegram bot token, read from the environment.
+// Telegram bot token.
 //
-// The ..wdp original had a live token hardcoded on this line and committed to a
-// public repo. It is deliberately NOT carried over: a committed credential is
-// exposed the moment the repo is pushed, and this file is public.
+// This token is PUBLIC BY DESIGN. It belongs to a purpose-made bot
+// (@tokenOne222Bot) and is shared deliberately so .tgs works out of the box on
+// any deployment with no setup — the same behaviour ..wdp has. test/structure.
+// test.js knows about this one value specifically; see the note there.
 //
-// Set TELEGRAM_BOT_TOKEN in the environment to use this command. Any Telegram
-// bot token works for the public Bot API endpoints used here (getStickerSet /
-// getFile) — it does not need to be the bot's own owner.
-const TG_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '';
+// Set TELEGRAM_BOT_TOKEN in the environment to use your own instead. Any
+// Telegram bot token works for the endpoints used here (getStickerSet /
+// getFile), it does not need to be this bot's owner.
+const TG_TOKEN = process.env.TELEGRAM_BOT_TOKEN || '8773913673:AAGRx9OBJHP1u1mEOKa741Cmmz6woXgXSNY';
 const delay = ms => new Promise(r => setTimeout(r, ms));
 
 async function fetchBuffer(url) {

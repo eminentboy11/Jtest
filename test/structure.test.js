@@ -292,7 +292,23 @@ describe('database API surface', () => {
 });
 
 describe('secrets', () => {
-  test('no credential-shaped strings are committed', () => {
+  /**
+   * One documented exception.
+   *
+   * commands/general/telegramsticker.js ships a Telegram bot token on purpose:
+   * it belongs to a purpose-made bot (@tokenOne222Bot) and is shared so .tgs
+   * works on any deployment with no setup. This is the owner's call and it is
+   * deliberate, not a leak.
+   *
+   * The carve-out is deliberately narrow — one exact value, in one exact file.
+   * Any OTHER credential-shaped string, in this file or anywhere else, still
+   * fails this test, so the check keeps doing its job.
+   */
+  const PUBLIC_BY_DESIGN = new Map([
+    ['commands/general/telegramsticker.js', '8773913673:AAGRx9OBJHP1u1mEOKa741Cmmz6woXgXSNY'],
+  ]);
+
+  test('no credential-shaped strings are committed (one documented exception)', () => {
     const patterns = [
       [/(\d{8,10}):AA[0-9A-Za-z_-]{30,}/, 'Telegram bot token'],
       [/xox[baprs]-[0-9A-Za-z-]{10,}/, 'Slack token'],
@@ -303,11 +319,26 @@ describe('secrets', () => {
     const hits = [];
     for (const f of [...repoFiles(), ...repoFiles('.json'), ...repoFiles('.md'), ...repoFiles('.example')]) {
       const src = read(f);
+      const allowed = PUBLIC_BY_DESIGN.get(rel(f));
       for (const [re, label] of patterns) {
-        if (re.test(src)) hits.push(`${rel(f)}: ${label}`);
+        const matches = src.match(new RegExp(re, 'g')) || [];
+        // Everything the pattern found, minus the one value this file is
+        // allowed to carry.
+        if (matches.some((m) => m !== allowed)) hits.push(`${rel(f)}: ${label}`);
       }
     }
     assert.deepEqual(hits, []);
+  });
+
+  test('the public token exception is exactly one value in one file', () => {
+    // Guards the carve-out itself: if someone drops another token into a second
+    // file, the map above must not quietly cover it.
+    for (const [file, value] of PUBLIC_BY_DESIGN) {
+      assert.ok(repoFiles().some((f) => rel(f) === file), `${file} should exist`);
+      const src = read(path.join(REPO, file));
+      assert.ok(src.includes(value), `${file} should actually contain the exempted value`);
+    }
+    assert.equal(PUBLIC_BY_DESIGN.size, 1, 'the exception list should stay minimal');
   });
 
   test('no SQLite/Mongo/pg driver is reachable from live code', () => {
