@@ -77,7 +77,7 @@ describe('discovery', () => {
     // other half, that the surface is the one we think it is.
     //
     // If you add a command: update this number deliberately.
-    assert.equal(table.commandCount, 169, 'command roster size changed');
+    assert.equal(table.commandCount, 389, 'command roster size changed');
 
     // A representative from each wave of the codebase, so a wholesale
     // regression (a broken require, a bad path) is caught by name too.
@@ -95,6 +95,13 @@ describe('discovery', () => {
       // ..wdp port, wave 3: the parity categories
       'alive', 'botinfo', 'antilink', 'antibadword', 'setmenu', 'broadcast',
       'play', 'song', 'video', 'yts', 'lyrics', 'fancytext',
+      // ..wdp port, wave 4 (phase 2): the remaining ported categories
+      'tetris', 'joke', 'fact', 'ship', 'quotes',
+      'calc', 'translate', 'weather', 'unpin',
+      'addnote', 'mynotes', 'stalkercmd', 'waifu',
+      'tomp3', 'togif', 'chatgpt',
+      // multi-command files: one file registers many commands
+      'porn', 'xvideos', 'fifaupcoming', 'bible', 'kiss', 'moviebox',
     ]) {
       assert.ok(table.get(name), `${name} must be loaded`);
     }
