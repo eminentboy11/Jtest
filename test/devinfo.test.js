@@ -96,6 +96,18 @@ describe('.devinfo answers for a dev', () => {
     assert.match(text, /DEBUG:/);
   });
 
+  test('a boot restore is reported, and is not reported when there was none', async () => {
+    statusFileWith({ restoredFiles: 3, restoredAt: '2026-10-01T09:00:00.000Z' });
+    const sock = H.makeDmSock();
+    await run(sock, devMsg());
+    assert.match(sock._rec.texts[0], /Restored 3 file\(s\) at boot/);
+
+    statusFileWith({});
+    const plain = H.makeDmSock();
+    await run(plain, devMsg());
+    assert.equal(/Restored/.test(plain._rec.texts[0]), false, 'no restore, no line');
+  });
+
   test('it never echoes a token', async () => {
     statusFileWith({});
     const saved = process.env.JUNE_DATA_TOKEN;
