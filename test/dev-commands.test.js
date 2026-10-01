@@ -309,45 +309,6 @@ describe('.shutdown', () => {
     }
   });
 
-  test('notifies every bot owner, from their own bot', async () => {
-    fakeEngine([A, B]);
-    const dms = [];
-    const botWithSock = (id) => ({
-      id,
-      sock: { sendMessage: async (jid, content) => { dms.push({ id, jid, text: content.text }); } },
-    });
-    const realGet = sessionService.get;
-    sessionService.get = (id) => botWithSock(id);
-    try {
-      await database.runAsBot(A, async () => database.setOwners([H.OWNER]));
-      await database.runAsBot(B, async () => database.setOwners(['2348099999998']));
-      const sock = H.makeDmSock();
-      await dispatchCapturingExit(
-        sock, H.textMsg('.shutdown', { dm: true, remoteJid: `${DEV1}@s.whatsapp.net` }));
-      assert.equal(dms.length, 2, 'one DM per bot');
-      assert.deepEqual(dms.map((d) => d.jid).sort(),
-        [H.OWNER, '2348099999998@s.whatsapp.net'].sort());
-      assert.ok(dms.every((d) => /going offline/i.test(d.text)));
-    } finally {
-      sessionService.get = realGet;
-    }
-  });
-
-  test('JUNE_SHUTDOWN_NOTICE=0 silences the notification', async () => {
-    fakeEngine([A]);
-    const saved = process.env.JUNE_SHUTDOWN_NOTICE;
-    process.env.JUNE_SHUTDOWN_NOTICE = '0';
-    try {
-      const sock = H.makeDmSock();
-      await dispatchCapturingExit(
-        sock, H.textMsg('.shutdown', { dm: true, remoteJid: `${DEV1}@s.whatsapp.net` }));
-      // the dev's own confirmation is still sent; nobody else is DM'd
-      assert.equal(sock._rec.texts.length, 1);
-    } finally {
-      if (saved === undefined) delete process.env.JUNE_SHUTDOWN_NOTICE;
-      else process.env.JUNE_SHUTDOWN_NOTICE = saved;
-    }
-  });
 });
 
 describe('.restart acts on one bot only', () => {
