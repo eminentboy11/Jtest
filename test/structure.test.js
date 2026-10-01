@@ -359,6 +359,87 @@ describe('secrets', () => {
     assert.deepEqual(hits, []);
   });
 
+  test('only the two dev commands can end the process', () => {
+    // The rule this repo is built on: Jtest runs up to 100 bots in ONE process
+    // behind a shared handler, so a command that calls process.exit() takes
+    // every tenant down. Exactly two commands may do it, both dev-number gated
+    // and silent to everyone else:
+    //
+    //   .upgrade   exit 44 — the loader re-syncs and relaunches (new code)
+    //   .shutdown  exit 45 — the loader keeps it down
+    //
+    // Checked TRANSITIVELY through local requires, because a command that
+    // requires a helper that exits is still a command that exits — which is how
+    // .clean used to reach index.js's exit sites.
+    const ALLOWED = new Set([
+      path.join('commands', 'owner', 'upgrade.js'),
+      path.join('commands', 'owner', 'shutdown.js'),
+    ]);
+
+    // Matches the reference as well as the call: platform/loader.js captures
+    // process.exit as a default parameter rather than calling it inline.
+    const ENDS_PROCESS = /process\.(exit|kill|abort)\b/;
+
+    const files = repoFiles();
+    const source = new Map(files.map((f) => [f, stripComments(read(f))]));
+    const endsIt = new Set(files.filter((f) => ENDS_PROCESS.test(source.get(f) || '')));
+
+    /** Every local file a file requires, recursively. */
+    const reaches = (start) => {
+      const seen = new Set();
+      const queue = [start];
+      let hit = false;
+      while (queue.length) {
+        const f = queue.shift();
+        if (seen.has(f)) continue;
+        seen.add(f);
+        if (endsIt.has(f)) hit = true;
+        const src = source.get(f) || '';
+        const re = /require\s*\(\s*['"](\.[^'"]+)['"]\s*\)/g;
+        let m;
+        while ((m = re.exec(src))) {
+          const r = resolveSpec(f, m[1]);
+          if (r && !seen.has(r)) queue.push(r);
+        }
+      }
+      return hit;
+    };
+
+    const offenders = files
+      .filter((f) => rel(f).startsWith(`commands${path.sep}`))
+      .filter((f) => reaches(f))
+      .map(rel);
+
+    assert.deepEqual([...offenders].sort(), [...ALLOWED].sort(),
+      'a command outside the two dev commands can end the process');
+  });
+
+  test('those two exit through the loader module, never process.exit directly', () => {
+    for (const name of ['upgrade', 'shutdown']) {
+      const f = path.join(REPO, 'commands', 'owner', `${name}.js`);
+      const src = stripComments(read(f));
+      assert.equal(/process\.(exit|kill|abort)\s*\(/.test(src), false,
+        `commands/owner/${name}.js must call loader.exitFor*, not process.exit() — ` +
+        'the exit codes live in platform/loader.js so they cannot drift');
+      assert.match(src, /\.\.\/\.\.\/platform\/loader/,
+        `commands/owner/${name}.js must use the shared loader protocol`);
+    }
+  });
+
+  test('no command requires the entry point', () => {
+    // index.js runs the whole platform at require time and exports nothing, so
+    // requiring it from a command is both circular and useless — and it is the
+    // one edge that puts every process.exit in index.js within a command's
+    // reach. (That is exactly what .clean did.)
+    const hits = repoFiles()
+      .filter((f) => rel(f).startsWith(`commands${path.sep}`))
+      .filter((f) => [...(stripComments(read(f))
+        .matchAll(/require\s*\(\s*['"](\.[^'"]+)['"]\s*\)/g))]
+        .some((m) => resolveSpec(f, m[1]) === path.join(REPO, 'index.js')))
+      .map(rel);
+    assert.deepEqual(hits, []);
+  });
+
   test('the spawned test helpers are inert when the runner executes them directly', () => {
     // Node's runner treats every .js file under a directory named `test/` as a
     // test file, so _child-exit.js and _child-reload.js get run a second time
