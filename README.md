@@ -22,6 +22,7 @@ Previous edition was **9MB + 700 deps (48 packages, ffmpeg, sharp, jimp, ytdl, s
   - `.shutdown` — **devs only, silently ignored for everyone else.** Runs the real graceful close, then exits `45` (stay down)
   - `.restart` — that bot's **owner**, and it reboots **only the bot the message arrived on** (`sessionService.reconnect(botId)`); other tenants never notice. It cannot fetch new code — only `.upgrade` re-syncs. Non-owners are ignored silently
   - see **Loader protocol** below for the exit codes and the loader-side contract
+- **A 428 no longer costs uptime** — `428 connectionClosed` is an ordinary server-side close, and the answer is to come straight back. It used to be grouped with `440`/`409` (a genuine duplicate session) and cost 15-120 s offline each time. Worse, ten consecutive closes parked the bot in a terminal `waiting` state that nothing read, so it stayed dark until the container was restarted — the "bot goes off after about a day" report. The policy (`platform/reconnect.js`) now retries a transient close in ~2-6 s with jitter, moves to a 5-minute slow lane after ten attempts instead of stopping, and a 60 s **watchdog** forces any paired bot that is down and not retrying back online. It never interrupts pairing, and never touches a deliberate stop
 - **Per-bot uptime that survives a restart** — an `.upgrade` swap is ~16 seconds, but it used to reset every bot's uptime to zero: the counter came from the in-memory socket. Each bot now stores its own total (sessions accumulate, `utils/uptime.js`), and a session is credited only up to the last proof of life, so an outage is never counted as uptime. `.up` shows the total, the current session and when the bot was first seen, next to the process figure
 - **391 commands shipped** behind a real hot-reloading loader — drop a file in `commands/` and it registers without a restart:
   - health: `.ping`, `.uptime`
@@ -398,7 +399,7 @@ Fully web-based edition — nothing like switching mode through env.
 npm test
 ```
 
-282 tests across 17 suites, using Node's built-in runner — no test framework dependency. Runs serially (`--test-concurrency=1`) because the loader suite writes real temporary files into `commands/`.
+301 tests across 18 suites, using Node's built-in runner — no test framework dependency. Runs serially (`--test-concurrency=1`) because the loader suite writes real temporary files into `commands/`.
 
 | suite | covers |
 |---|---|
@@ -409,6 +410,7 @@ npm test
 | `test/structure.test.js` | whole-repo invariants: syntax, module graph, dependency hygiene, no committed secrets |
 | `test/logging.test.js` | libsignal's session churn staying silenced while decrypt failures still print — driven against the real libsignal `SessionRecord` |
 | `test/startup.test.js` | the paired-bot startup card (prefix, owner, platform, counts) and the single-source platform detection behind `global.platform` |
+| `test/reconnect.test.js` | the reconnect policy: 428 retried fast and kept out of the conflict counter, 440/409 still backing off hard, the 503/408/500 lanes, and that no status ever ends in "stop" — plus the watchdog's rules (paired only, never mid-pairing, never in front of a scheduled retry) |
 | `test/uptime.test.js` | uptime across restarts: sessions accumulate, the restart gap is not credited, a stale heartbeat is not counted up to now, per-bot isolation, clock skew, and what `.up` renders |
 | `test/clean.test.js` | `.clean` reading the antidelete replay cache: newest-first deletion, reply-narrows-to-one-sender, bad-input rejection, and that the module requires no entry point and never ends the process |
 | `test/dev-commands.test.js` | the process commands: silence for every non-allowed sender (no reply, no reaction), the `@lid`/`participantAlt` match, `.upgrade` refusing to exit with no loader, `.shutdown` closing every socket then exiting `45`, and `.restart` reconnecting one bot while never calling `process.exit` |

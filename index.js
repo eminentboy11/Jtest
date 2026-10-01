@@ -30,6 +30,7 @@ const slots = require('./platform/slots');
 const { purgeBot } = require('./platform/purge');
 const coldArchive = require('./utils/coldArchive');
 const uptime = require('./utils/uptime');
+const reconnectPolicy = require('./platform/reconnect');
 
 const RAW_PORT = process.env.SERVER_PORT || process.env.PTERODACTYL_PORT || process.env.PORT || '3000';
 const PORT = Number(RAW_PORT) || 3000;
@@ -148,6 +149,7 @@ async function bootBot(botId, opts = {}) {
     }
 
     bot.state = 'connecting';
+    bot.stateAt = Date.now();
     bot.lastError = null;
     bot.reconnectCount = bot.reconnectCount || 0;
     bot.pairingDone = false;
@@ -236,6 +238,7 @@ async function bootBot(botId, opts = {}) {
             if (connection === 'open') {
                 bot.pairingDone = true;
                 bot.state = 'connected';
+                bot.stateAt = Date.now();
                 bot.connectedAt = Date.now();
                 // Persist the session start: an upgrade swap must not reset this
                 // bot's uptime to zero. Also closes the previous session, which
@@ -302,37 +305,24 @@ async function bootBot(botId, opts = {}) {
                     try { coldArchive.deleteRemote(bot.id); } catch (_) {}
                     return;
                 }
-                if (bot.reconnectCount >= 10) {
-                    console.log(`[ ${bot.id} ] Max reconnects 10 — stopping`);
-                    bot.state = 'waiting';
-                    bot.lastError = reason;
-                    try { slots.setFailed(bot.id, reason); } catch (_) {}
-                    return;
-                }
                 bot.reconnectCount++;
 
-                // Per-status backoff, WDP's table (their index.js ~1350-1400).
-                // The flat 5s hammer is what turned transient WhatsApp hiccups
-                // into a reconnect loop: 503 means their edge dropped the
-                // stream (give it room — linear 30s steps capped at 5 min),
-                // 408 gets exponential backoff with jitter, 500 a plain 10s,
-                // and 428/440/409 mean another socket holds the session —
-                // back off harder so the duplicate can die first.
-                let waitMs = 5000;
-                if (statusCode === 503) {
-                    bot.err503 = (bot.err503 || 0) + 1;
-                    waitMs = Math.min(30000 * bot.err503, 300000);
-                } else if (statusCode === 408) {
-                    bot.err408 = (bot.err408 || 0) + 1;
-                    waitMs = Math.min(5000 * Math.pow(2, Math.min(bot.err408, 3)) + Math.floor(Math.random() * 1000), 60000);
-                } else if (statusCode === 500) {
-                    waitMs = 10000;
-                } else if (statusCode === 428 || statusCode === 440 || statusCode === 409) {
-                    bot.errConflict = (bot.errConflict || 0) + 1;
-                    waitMs = Math.min(15000 * bot.errConflict, 120000);
+                // Policy lives in platform/reconnect.js so it can be tested.
+                // It no longer parks the bot after 10 failures — past that it
+                // moves to a slow lane and keeps trying forever, because
+                // "waiting" used to be terminal for a paired bot and left it
+                // dark until the container was restarted.
+                const plan = reconnectPolicy.nextDelay(statusCode, bot, bot.reconnectCount);
+                const waitMs = plan.waitMs;
+                bot.reconnectAt = Date.now() + waitMs;
+
+                if (plan.lane === 'slow') {
+                    console.log(`[ ${bot.id} ] ${bot.reconnectCount} consecutive closes — slow lane, retrying every ${Math.round(waitMs / 1000)}s (status ${statusCode})`);
+                } else {
+                    console.log(`[ ${bot.id} ] Reconnect #${bot.reconnectCount} in ${Math.round(waitMs / 1000)}s (status ${statusCode}) ${reason}`);
                 }
-                console.log(`[ ${bot.id} ] Reconnect #${bot.reconnectCount} in ${Math.round(waitMs / 1000)}s (status ${statusCode}) ${reason}`);
                 bot.state = 'connecting';
+                bot.stateAt = Date.now();
                 bot._reconnecting = true;
                 await delay(waitMs);
                 if (stale()) return;
@@ -551,6 +541,7 @@ attachPlatform(app, server).then(async () => {
         // Keeps each connected bot's uptime liveness stamp fresh, so an
         // outage is never credited as uptime after a restart.
         uptime.startHeartbeat();
+        startBotWatchdog();
         if (coldArchive.enabled()) {
             console.log(
                 `${tick}${label('COLD')} ${val('GitHub warehouse:')} ${chalk.bold.cyan(coldArchive.CFG.repo)} ` +
@@ -588,6 +579,42 @@ app.get('/status', (_, res) => {
  * Idempotent: a SIGTERM arriving while `.shutdown` is already closing must not
  * run the whole thing twice.
  */
+/**
+ * Watchdog — the safety net under the reconnect policy.
+ *
+ * Every 60s, any PAIRED bot that is not connected and not already reconnecting
+ * gets forced back online. Without this, a bot that lands in a state nothing
+ * schedules out of stays dark until someone notices: that is exactly what the
+ * retired park-at-10 branch did, and it is the "bot went off after about a day"
+ * report.
+ *
+ * It deliberately leaves pairing alone — a bot awaiting its first QR or pairing
+ * code has pairingDone false and is never touched — and it leaves 'stopped'
+ * alone, because that is a deliberate state. `reconnectAt` is honoured so the
+ * watchdog never cuts in front of a backoff that is already scheduled.
+ */
+function startBotWatchdog() {
+    if (botWatchdog) return botWatchdog;
+    botWatchdog = setInterval(() => {
+        try {
+            const now = Date.now();
+            for (const bot of bots.values()) {
+                if (!reconnectPolicy.shouldRevive(bot, now)) continue;
+                if (bot.reconnectAt && now < bot.reconnectAt) continue;   // backoff still running
+                console.log(`[ ${bot.id} ] Watchdog: not connected and not retrying — forcing a reconnect`);
+                bot.reconnectCount = 0;
+                bot._reconnecting = true;
+                bootBot(bot.id, { force: true })
+                    .then(() => { bot._reconnecting = false; })
+                    .catch((e) => { bot._reconnecting = false; console.log(`[ ${bot.id} ] Watchdog reconnect failed: ${e.message}`); });
+            }
+        } catch (e) { console.log(`[ WATCHDOG ] ${e.message}`); }
+    }, 60_000);
+    botWatchdog.unref?.();   // never hold the process open
+    return botWatchdog;
+}
+
+let botWatchdog = null;
 let closeStarted = false;
 async function closeEverything() {
     if (closeStarted) return { ok: true, already: true };
