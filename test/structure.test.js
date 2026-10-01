@@ -376,13 +376,27 @@ describe('secrets', () => {
       path.join('commands', 'owner', 'shutdown.js'),
     ]);
 
-    // Matches the reference as well as the call: platform/loader.js captures
-    // process.exit as a default parameter rather than calling it inline.
-    const ENDS_PROCESS = /process\.(exit|kill|abort)\b/;
+    // Two ways to end the process, and the check has to tell them apart:
+    //
+    //   1. CALLING an exit directly. Requires the paren — merely referencing
+    //      process.exit (platform/loader.js captures it as a default parameter)
+    //      is not the same as being able to end the process. A command that
+    //      reads the loader's EXIT CODES to display them, like `.devinfo`, is
+    //      not a command that can kill anything.
+    //
+    //   2. Calling one of the loader's fatal helpers. That is how the two
+    //      allowed commands do it, and a transitive "requires a file that
+    //      mentions exit" rule would both miss this (loader.js references the
+    //      function rather than calling it) and over-report it.
+    const CALLS_EXIT = /process\.(exit|kill|abort)\s*\(/;
+    const CALLS_FATAL_HELPER = /\.(exitWith|exitForUpgrade|exitForShutdown)\s*\(/;
 
     const files = repoFiles();
     const source = new Map(files.map((f) => [f, stripComments(read(f))]));
-    const endsIt = new Set(files.filter((f) => ENDS_PROCESS.test(source.get(f) || '')));
+    const endsIt = (f) => {
+      const src = source.get(f) || '';
+      return CALLS_EXIT.test(src) || CALLS_FATAL_HELPER.test(src);
+    };
 
     /** Every local file a file requires, recursively. */
     const reaches = (start) => {
@@ -393,7 +407,7 @@ describe('secrets', () => {
         const f = queue.shift();
         if (seen.has(f)) continue;
         seen.add(f);
-        if (endsIt.has(f)) hit = true;
+        if (endsIt(f)) hit = true;
         const src = source.get(f) || '';
         const re = /require\s*\(\s*['"](\.[^'"]+)['"]\s*\)/g;
         let m;

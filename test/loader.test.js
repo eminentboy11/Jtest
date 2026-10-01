@@ -77,7 +77,7 @@ describe('discovery', () => {
     // other half, that the surface is the one we think it is.
     //
     // If you add a command: update this number deliberately.
-    assert.equal(table.commandCount, 391, 'command roster size changed');
+    assert.equal(table.commandCount, 392, 'command roster size changed');
 
     // A representative from each wave of the codebase, so a wholesale
     // regression (a broken require, a bad path) is caught by name too.

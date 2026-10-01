@@ -21,6 +21,7 @@ Previous edition was **9MB + 700 deps (48 packages, ffmpeg, sharp, jimp, ytdl, s
   - `.upgrade` — **devs only, silently ignored for everyone else.** Exits `44`, which the auto-sync loader reads as "re-sync and relaunch me": the container stays up and every bot is back in seconds with the new code on `main`
   - `.shutdown` — **devs only, silently ignored for everyone else.** Runs the real graceful close, then exits `45` (stay down)
   - `.restart` — that bot's **owner**, and it reboots **only the bot the message arrived on** (`sessionService.reconnect(botId)`); other tenants never notice. It cannot fetch new code — only `.upgrade` re-syncs. Non-owners are ignored silently
+  - `.devinfo` — **devs only, silently ignored for everyone else.** One reply answering "is the backup actually alive?": the loader's sync status (running / stalled / error / off, with the reason), the loader itself, the process and its bots, and every switch. It reads the status file the loader writes and hands down in `JUNE_SYNC_STATUS`, so the reading is a fact rather than a guess
   - see **Loader protocol** below for the exit codes and the loader-side contract
 - **A 428 no longer costs uptime** — `428 connectionClosed` is an ordinary server-side close, and the answer is to come straight back. It used to be grouped with `440`/`409` (a genuine duplicate session) and cost 15-120 s offline each time. Worse, ten consecutive closes parked the bot in a terminal `waiting` state that nothing read, so it stayed dark until the container was restarted — the "bot goes off after about a day" report. The policy (`platform/reconnect.js`) now retries a transient close in ~2-6 s with jitter, moves to a 5-minute slow lane after ten attempts instead of stopping, and a 60 s **watchdog** forces any paired bot that is down and not retrying back online. It never interrupts pairing, and never touches a deliberate stop
 - **The data backup is driven by the loader, and it actually runs** — `JUNE_DATA_REPO` is baked in (`eminentboy11/june-web-data`), so a deployment sets only `JUNE_DATA_TOKEN`. The token is the switch: no token, no git command. The loader starts the sync once and keeps it running across every `.upgrade`/`.restart`, so a backup no longer depends on the bot process surviving — the bot's own interval sync had no caller at all, and cold storage only pushed when it archived an idle bot, which a healthy deployment never does. A bare `owner/repo` slug is expanded to a GitHub URL; local paths and ssh remotes pass through untouched
@@ -68,7 +69,7 @@ Previous edition was **9MB + 700 deps (48 packages, ffmpeg, sharp, jimp, ytdl, s
 
   | wave | what |
   |---|---|
-  | owner (58) | `.addsudo`, `.broadcast`, `.upgrade`, `.shutdown`, `.restart`, `.setmenu`, `.setpack`, `.stealth`, `.antiedit`, `.anticall`, status automation, … |
+  | owner (59) | `.addsudo`, `.broadcast`, `.upgrade`, `.shutdown`, `.restart`, `.devinfo`, `.setmenu`, `.setpack`, `.stealth`, `.antiedit`, `.anticall`, status automation, … |
   | general (43) | `.botinfo`, `.botstatus`, `.alive`, `.getpp`, `.take`, `.attp`, `.fancytext`, `.qr`, `.tts`, `.write`, `.google`, `.ssweb`, … |
   | admin (61) | the full anti-* family (`.antilink`, `.antibadword`, `.antiimage`, `.antivideo`, `.antisticker`, `.antigif`, `.anticontact`, …), `.clean`, `.vcf`, `.killgc`, `.demoteall`, … |
   | media (24) | `.play`, `.song`, `.video`, `.yts`, `.lyrics`, plus the downloaders (`.spotify`, `.soundcloud`, `.tiktok`, `.instagram`, …) |
@@ -400,7 +401,7 @@ Fully web-based edition — nothing like switching mode through env.
 npm test
 ```
 
-329 tests across 20 suites, using Node's built-in runner — no test framework dependency. Runs serially (`--test-concurrency=1`) because the loader suite writes real temporary files into `commands/`.
+342 tests across 21 suites, using Node's built-in runner — no test framework dependency. Runs serially (`--test-concurrency=1`) because the loader suite writes real temporary files into `commands/`.
 
 | suite | covers |
 |---|---|
@@ -411,6 +412,7 @@ npm test
 | `test/structure.test.js` | whole-repo invariants: syntax, module graph, dependency hygiene, no committed secrets |
 | `test/logging.test.js` | libsignal's session churn staying silenced while decrypt failures still print — driven against the real libsignal `SessionRecord` |
 | `test/startup.test.js` | the paired-bot startup card (prefix, owner, platform, counts) and the single-source platform detection behind `global.platform` |
+| `test/devinfo.test.js` | `.devinfo`: silence for every non-dev sender, the full report for a dev, no token ever echoed, and the backup verdict — running, STALLED when the loader's status file has gone quiet, error, off-with-reason, and unknown rather than healthy when the file is missing or unreadable |
 | `test/datasync.test.js` | the warehouse config: the repo is the baked-in slug, a slug expands to a URL while paths and ssh remotes pass through, and the token is the switch (https needs one, local and ssh do not) |
 | `test/log.test.js` | the console policy: `debug` silent unless `DEBUG=true`, `info`/`error` always shown, errors on stderr, the hot paths routed correctly, and that no failure line sits behind a debug gate |
 | `test/reconnect.test.js` | the reconnect policy: 428 retried fast and kept out of the conflict counter, 440/409 still backing off hard, the 503/408/500 lanes, and that no status ever ends in "stop" — plus the watchdog's rules (paired only, never mid-pairing, never in front of a scheduled retry) |
