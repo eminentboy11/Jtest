@@ -40,8 +40,34 @@ const CFG = {
   snapshot: String(process.env.GIT_SYNC_SNAPSHOT || '').toLowerCase() === 'true',
 };
 
+/**
+ * The data warehouse repo, baked in. The operator supplies only the token
+ * (JUNE_DATA_TOKEN) — the repo name is not something a deployment should have
+ * to get right, and a typo there silently backs up nothing.
+ */
+const DEFAULT_DATA_REPO = 'eminentboy11/june-web-data';
+
 const AUTHOR = ['-c', 'user.name=June X Sync', '-c', 'user.email=sync@junex.local'];
 const IGNORE = 'auth/\n.env\n.env.*\n*.token\nsecrets/\nnode_modules/\n';
+
+/**
+ * The remote as git needs to see it.
+ *
+ * JUNE_DATA_REPO carries a GitHub SLUG ("owner/repo" — that is what the docs
+ * and .env.example show), but git wants a URL, so a bare slug is expanded here.
+ * Anything that is already a URL, an ssh remote, or a filesystem path is left
+ * alone — that last case matters for local testing and for anyone syncing to a
+ * path or a self-hosted remote.
+ */
+function remoteUrl(remote = CFG.remote) {
+  const r = String(remote || '').trim();
+  if (!r) return '';
+  if (r.includes('://')) return r;                       // https://, ssh://, file://
+  if (r.startsWith('git@')) return r;                    // scp-style ssh
+  if (/^[~/.]/.test(r)) return r;                        // absolute or relative path
+  if (/^[\w.-]+\/[\w.-]+$/.test(r)) return `https://github.com/${r}.git`;
+  return r;
+}
 
 function git(args, cwd = CFG.dir) {
   const env = { ...process.env, GIT_TERMINAL_PROMPT: '0' };
@@ -57,14 +83,15 @@ function git(args, cwd = CFG.dir) {
 
 function ensure() {
   fs.mkdirSync(CFG.dir, { recursive: true });
+  const url = remoteUrl();
   if (!fs.existsSync(path.join(CFG.dir, '.git'))) {
-    const cloned = git(['clone', '--depth', '1', CFG.remote, CFG.dir], path.dirname(CFG.dir) || '.');
+    const cloned = git(['clone', '--depth', '1', url, CFG.dir], path.dirname(CFG.dir) || '.');
     if (cloned.status !== 0) {                 // empty remote: start fresh
       git(['init', '-b', 'main']);
-      git(['remote', 'add', 'origin', CFG.remote]);
+      git(['remote', 'add', 'origin', url]);
     }
   }
-  git(['remote', 'set-url', 'origin', CFG.remote]);   // remote stays token-free
+  git(['remote', 'set-url', 'origin', url]);   // remote stays token-free
   const ig = path.join(CFG.dir, '.gitignore');
   if (!fs.existsSync(ig)) fs.writeFileSync(ig, IGNORE);
 }
@@ -141,7 +168,7 @@ function start(onLog = () => {}) {
 /** Embedder config (coldArchive uses this instead of env). */
 function configure(opts = {}) { Object.assign(CFG, opts); }
 
-module.exports = { sync, start, pull, git, CFG, configure, ensure, commitAll, push };
+module.exports = { sync, start, pull, git, CFG, DEFAULT_DATA_REPO, remoteUrl, configure, ensure, commitAll, push };
 
 if (require.main === module) {
   const r = sync(process.argv[2] || 'manual');

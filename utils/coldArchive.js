@@ -30,7 +30,9 @@ const database = require('../database');
 const gitSync = require('./gitSync');
 
 const CFG = {
-  repo: process.env.JUNE_DATA_REPO || '',
+  // Baked in: the operator sets only JUNE_DATA_TOKEN. Override with
+  // JUNE_DATA_REPO (a slug or a full URL) to point at a different warehouse.
+  repo: process.env.JUNE_DATA_REPO || gitSync.DEFAULT_DATA_REPO,
   token: process.env.JUNE_DATA_TOKEN || '',
   idleDays: Number(process.env.JUNE_ARCHIVE_IDLE_DAYS || 5),
   host: process.env.JUNE_HOST_NAME || os.hostname(),
@@ -42,7 +44,23 @@ const CFG = {
 };
 
 const DAY = 86_400_000;
-const enabled = () => Boolean(CFG.repo);
+
+/** https remotes need credentials; local paths and ssh remotes do not. */
+const needsToken = (remote) => /^https?:\/\//i.test(gitSync.remoteUrl(remote));
+
+/**
+ * The TOKEN is the switch, not the repo.
+ *
+ * The repo is baked in, so gating on it would turn cold storage on for every
+ * deployment that has never configured anything — and "on" here means cloning
+ * and pushing to a GitHub repo. No token means nobody opted in, so the feature
+ * stays off and no git command ever runs.
+ *
+ * Auth is required only where auth is actually needed: an https remote (the
+ * baked-in GitHub slug, or any other https warehouse) needs the token, while a
+ * local path and an ssh remote authenticate themselves and need nothing.
+ */
+const enabled = () => Boolean(CFG.repo) && (!needsToken(CFG.repo) || Boolean(CFG.token));
 
 let stateCache = null;
 let stateTimer = null;
