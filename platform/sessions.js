@@ -3,6 +3,8 @@
  */
 'use strict';
 
+const log = require('../utils/log');
+
 const DEBUG_LOG = ['true','1','yes','on'].includes(String(process.env.DEBUG || '').trim().toLowerCase());
 const qrcode = require('qrcode');
 const bridge = require('./bridge');
@@ -39,7 +41,7 @@ async function provisionSlot(slot) {
                             bot.slotId = slot.slotId;
                             // If pairing code was already generated inside provision (before bind), push it to slot now
                             if (bot.pairing?.lastCode) {
-                                console.log(`[ ${bot.id} ] Commit: pushing existing code ${bot.pairing.lastCode} to slot ${slot.slotId.slice(0,6)}`);
+                                log.debug(`[ ${bot.id} ] Commit: pushing existing code ${bot.pairing.lastCode} to slot ${slot.slotId.slice(0,6)}`);
                                 slots.setCode(bot.id, bot.pairing.lastCode, bot.pairing.attempts, 3);
                             }
                             // If QR was generated before bind, push it too
@@ -56,14 +58,14 @@ async function provisionSlot(slot) {
                 },
             }
         );
-        console.log(`[ PLATFORM ] Provisioned ${slot.mode} session "${result.id}" for slot ${slot.slotId.slice(0,6)}…`);
+        log.debug(`[ PLATFORM ] Provisioned ${slot.mode} session "${result.id}" for slot ${slot.slotId.slice(0,6)}…`);
         return slot;
     } catch (error) {
         const botId = slot.botId;
         if (botId) await registry.markRemoved(botId).catch(() => {});
         slots.discard(slot.slotId);
         const reason = error.result?.reason || String(error.message || '').replace(/^PROVISION_FAILED:/, '');
-        if (error.rollbackError) console.error(`[ PLATFORM ] Rollback failed for "${botId || '?'}": ${error.rollbackError.message}`);
+        if (error.rollbackError) log.error(`[ PLATFORM ] Rollback failed for "${botId || '?'}": ${error.rollbackError.message}`);
         throw new Error(provisioningMessage(reason));
     }
 }
@@ -91,7 +93,7 @@ async function requestAnotherCode(slot) {
         // Reset the internal requested flag to allow fresh code (pairing code only, no QR talk)
         if (bot.pairing) bot.pairing._requested = false;
         const cleanPhone = String(bot.phone).replace(/\D/g, '');
-        console.log(`[ ${bot.id} ] Explicit retry: requesting new pairing code for ${cleanPhone}`);
+        log.debug(`[ ${bot.id} ] Explicit retry: requesting new pairing code for ${cleanPhone}`);
         const code = await bot.sock.requestPairingCode(cleanPhone);
         const attempt = (bot.pairing.attempts || 0) + 1;
         bot.pairing.attempts = attempt;
@@ -100,7 +102,7 @@ async function requestAnotherCode(slot) {
         if (attempt >= 3) bot.pairing.exhausted = true;
         slots.setCode(bot.id, code, attempt, 3);
         bridge.emitPairingCode(bot, code, { attempt, limit: 3 });
-        console.log(`[ ${bot.id} ] 🔑 New pairing code: ${code} (attempt ${attempt}/3)`);
+        log.info(`[ ${bot.id} ] 🔑 New pairing code: ${code} (attempt ${attempt}/3)`);
         return { ok: true, code };
     } catch (e) {
         throw new Error(e.message);
@@ -123,7 +125,7 @@ function wireBridge() {
             const botNum = sock?.user?.id?.split(':')[0] || bot.accountNumber || null;
             if (slots.getByBotId(bot.id)) {
                 slots.setPaired(bot.id, botNum);
-                console.log(`[ PLATFORM ] Slot paired — session "${bot.id}" linked (+${botNum || '?'}).`);
+                log.debug(`[ PLATFORM ] Slot paired — session "${bot.id}" linked (+${botNum || '?'}).`);
             }
             if (await registry.isWebManaged(bot.id)) {
                 await registry.markPaired(bot.id, botNum);
@@ -145,10 +147,10 @@ async function removeWebSession(botId, why) {
         if (!result?.ok) throw new Error(result?.reason || 'remove-failed');
         await registry.markRemoved(botId);
         gcStats.sessionsRemoved++;
-        console.log(`[ GC ] Removed "${botId}" (${why})`);
+        log.debug(`[ GC ] Removed "${botId}" (${why})`);
         return result;
     } catch (err) {
-        console.error(`[ GC ] Failed to remove "${botId}":`, err.message);
+        log.error(`[ GC ] Failed to remove "${botId}":`, err.message);
         return { ok: false, reason: err.message };
     }
 }
@@ -178,7 +180,7 @@ async function runGC(trigger = 'interval') {
         gcStats.lastError = null;
     } catch (err) {
         gcStats.lastError = err.message;
-        console.error('[ GC ] Sweep error:', err.message);
+        log.error('[ GC ] Sweep error:', err.message);
     }
     return { ...gcStats, trigger };
 }

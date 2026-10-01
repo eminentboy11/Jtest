@@ -1,5 +1,7 @@
 'use strict';
 
+const log = require('./log');
+
 /**
  * coldArchive — the COLD tier of June X's storage ladder.
  *
@@ -152,7 +154,7 @@ function archiveBot(botId, reason = 'idle') {
   const s = loadState();
   s[id] = { ...(s[id] || {}), archived: true, archivedAt: Date.now() };
   flushState();
-  console.log(`[ ${id} ] ❄️  Archived to GitHub (${reason}) — local copy removed`);
+  log.debug(`[ ${id} ] ❄️  Archived to GitHub (${reason}) — local copy removed`);
   return { ok: true, bytes: archivedBytes };
 }
 
@@ -168,7 +170,7 @@ function restoreBot(botId) {
   const stage = fs.mkdtempSync(path.join(os.tmpdir(), 'june-stage-'));
   try {
     const x = tar(['-xzf', tarball, '-C', stage]);
-    if (!x.ok) { console.log(`[ ${id} ] Restore failed: ${x.out}`); return false; }
+    if (!x.ok) { log.error(`[ ${id} ] Restore failed: ${x.out}`); return false; }
     const srcJson = path.join(stage, 'data', 'bots', `${id}.json`);
     if (fs.existsSync(srcJson)) {
       fs.mkdirSync(database.getDataDir(), { recursive: true });
@@ -184,7 +186,7 @@ function restoreBot(botId) {
   const s = loadState();
   s[id] = { ...(s[id] || {}), archived: false, lastActiveAt: Date.now() };
   flushState();
-  console.log(`[ ${id} ] 🔥 Restored from GitHub cold storage`);
+  log.debug(`[ ${id} ] 🔥 Restored from GitHub cold storage`);
   return true;
 }
 
@@ -258,8 +260,8 @@ function start() {
   const t = setInterval(() => {
     try {
       const ids = sweep();
-      if (ids.length) console.log(`[ COLD ] Archived ${ids.length} idle bot(s): ${ids.join(', ')}`);
-    } catch (e) { console.log(`[ COLD ] sweep error: ${e.message}`); }
+      if (ids.length) log.debug(`[ COLD ] Archived ${ids.length} idle bot(s): ${ids.join(', ')}`);
+    } catch (e) { log.error(`[ COLD ] sweep error: ${e.message}`); }
   }, 60 * 60_000);
   t.unref?.();
   process.on('SIGTERM', flushState);

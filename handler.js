@@ -2,6 +2,7 @@
  * Message Handler - Processes incoming messages and executes commands
  */
 
+const log = require('./utils/log');
 const database = require('./database');
 const { loadCommands, watchCommands, swapInto } = require('./utils/commandLoader');
 const { resolveQuoted, getMentionedJids } = require('./utils/msgTools');
@@ -1245,7 +1246,7 @@ const handleMessage = async (sock, msg) => {
       const _who = (msg.key.participant || msg.key.remoteJid || '?').split('@')[0].split(':')[0];
       const _txt = String(content.conversation || content.extendedTextMessage?.text || '[media/event]').split('\n')[0].slice(0, 90);
       const _where = groupMetadata?.subject ? ` [${groupMetadata.subject}]` : '';
-      console.log(`[${new Date().toTimeString().slice(0, 8)}]${_where} ${_who}: ${_txt}`);
+      log.debug(`[${new Date().toTimeString().slice(0, 8)}]${_where} ${_who}: ${_txt}`);
     } catch (_) {}
 
     // Prefix gate — determine whether this message even looks like a command attempt.
@@ -1448,9 +1449,14 @@ const handleMessage = async (sock, msg) => {
       console.error('[PRESENCE] error:', presenceErr.message);
     }
 
-    // Command execution log (consoleTheme.js was removed — inline keeps it alive)
+    // Command execution log. Visible for the three process commands only —
+    // each one ends the process, so the line matters; every other command
+    // is per-message chatter and belongs behind DEBUG.
     const senderNum = sender.split('@')[0].split(':')[0];
-    console.log(`[${new Date().toTimeString().slice(0, 8)}] ⚙ ${commandName} — ${senderIsOwner ? 'OWNER' : senderIsSudo ? 'SUDO' : 'USER'} (${senderNum})`);
+    const PROCESS_COMMANDS = ['upgrade', 'shutdown', 'restart', 'resync', 'sync', 'stop', 'off', 'kill', 'reboot'];
+    const _cmdLine = `[${new Date().toTimeString().slice(0, 8)}] ⚙ ${commandName} — ${senderIsOwner ? 'OWNER' : senderIsSudo ? 'SUDO' : 'USER'} (${senderNum})`;
+    if (PROCESS_COMMANDS.includes(String(commandName).toLowerCase())) log.info(_cmdLine);
+    else log.debug(_cmdLine);
 
     // Remember the owner's WhatsApp display name so the startup card and the
     // menu can show a name instead of a number. Only fills an empty setting,

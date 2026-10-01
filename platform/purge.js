@@ -1,5 +1,7 @@
 'use strict';
 
+const log = require('../utils/log');
+
 /**
  * purgeBot — clear everything pertaining to one botId.
  *
@@ -71,7 +73,7 @@ async function purgeBot(botId, { reason = 'purge', bots, authRoot } = {}) {
     } catch (_) {}
 
     if (['true','1','yes','on'].includes(String(process.env.DEBUG || '').trim().toLowerCase())) {
-        console.log(`[ ${id} ] 🧹 Purged (${reason}) — ${cleared.join(', ') || 'nothing to clear'}`);
+        log.debug(`[ ${id} ] 🧹 Purged (${reason}) — ${cleared.join(', ') || 'nothing to clear'}`);
     }
     return { ok: true, id, reason, cleared };
 }

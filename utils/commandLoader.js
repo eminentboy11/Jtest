@@ -1,5 +1,7 @@
 'use strict';
 
+const log = require('./log');
+
 /**
  * Command loader.
  *
@@ -173,10 +175,10 @@ function watchCommands(callback, opts = {}) {
       try {
         const fresh = reloadCommands();
         if (typeof callback === 'function') callback(fresh);
-        console.log(`[ COMMANDS ] Hot-reloaded ${fresh.commandCount} commands (${changedFile})`);
+        log.debug(`[ COMMANDS ] Hot-reloaded ${fresh.commandCount} commands (${changedFile})`);
       } catch (error) {
         // Keep the previous command set intact on failure.
-        console.error('[ COMMANDS ] Hot-reload failed:', error.message);
+        log.error('[ COMMANDS ] Hot-reload failed:', error.message);
       }
     }, debounceMs);
   };
@@ -194,11 +196,11 @@ function watchCommands(callback, opts = {}) {
       scheduleReload(name);
     });
     watcher.on('error', (error) => {
-      console.error('[ COMMANDS ] Watcher error:', error.message);
+      log.error('[ COMMANDS ] Watcher error:', error.message);
     });
   } catch (error) {
     // Hot-reload is a convenience, never a boot requirement.
-    console.warn('[ COMMANDS ] Hot-reload unavailable:', error.message);
+    log.error('[ COMMANDS ] Hot-reload unavailable:', error.message);
   }
 
   return {
