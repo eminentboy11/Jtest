@@ -1,5 +1,7 @@
 'use strict';
 
+const log = require('./log');
+
 /**
  * gitSync — mirror a data directory to a git remote using ONLY the git wire
  * protocol (clone / fetch / push). REST API quota consumed: ZERO.
@@ -143,5 +145,5 @@ module.exports = { sync, start, pull, git, CFG, configure, ensure, commitAll, pu
 
 if (require.main === module) {
   const r = sync(process.argv[2] || 'manual');
-  console.log(`[gitSync] ${r.pushed ? 'PUSHED' : 'no push needed'} — ${r.out}`);
+  log.debug(`[gitSync] ${r.pushed ? 'PUSHED' : 'no push needed'} — ${r.out}`);
 }

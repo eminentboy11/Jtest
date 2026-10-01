@@ -15,7 +15,7 @@ Previous edition was **9MB + 700 deps (48 packages, ffmpeg, sharp, jimp, ytdl, s
 - **No dev dashboard** (`/dev` removed), no `logStore`, no MongoDB registry
 - **No JUNE_SESSIONS env** — sessions only via web UI at `/`, persisted in `data/platform-registry.json`
 - **Tiered storage** — HOT RAM (LRU bot stores, idle unload) → WARM disk (`data/` + `auth/`) → COLD GitHub (`june-web-data`: one `bots/<id>.tar.gz` per offline+idle bot, pushed over the git wire protocol, zero REST quota). Live bots are never archived; waking a cold bot is one pull+extract. `JUNE_DATA_REPO` empty = feature off
-- **Quiet console by default** — per-bot lifecycle chatter (event dumps, close reasons, pairing attempts, purge traces) logs only with `DEBUG=true` in env; otherwise only actionable lines print
+- **Quiet console by default** — the console is for what a human must act on. Visible with `DEBUG` unset: the startup box, errors, `[ <botId> ] ✅ Connected as …`, pairing codes, and the three process commands (`.upgrade`, `.shutdown`, `.restart`) with their loader-side exit lines. Everything else — every inbound message, every command invocation, reconnect/backoff/watchdog chatter, boot bookkeeping, session provisioning, archiving, GC — needs `DEBUG=true`. Enforced by `utils/log.js` and `test/log.test.js`, which also asserts no failure message can be routed into the debug gate
 - **No JUNE_PLATFORM toggle** — always web
 - **Process commands are scoped like a multi-tenant system should be** — one process runs up to 100 bots, so anything that ends a process is a dev decision and anything a tenant may do touches their own bot only:
   - `.upgrade` — **devs only, silently ignored for everyone else.** Exits `44`, which the auto-sync loader reads as "re-sync and relaunch me": the container stays up and every bot is back in seconds with the new code on `main`
@@ -399,7 +399,7 @@ Fully web-based edition — nothing like switching mode through env.
 npm test
 ```
 
-301 tests across 18 suites, using Node's built-in runner — no test framework dependency. Runs serially (`--test-concurrency=1`) because the loader suite writes real temporary files into `commands/`.
+311 tests across 19 suites, using Node's built-in runner — no test framework dependency. Runs serially (`--test-concurrency=1`) because the loader suite writes real temporary files into `commands/`.
 
 | suite | covers |
 |---|---|
@@ -410,6 +410,7 @@ npm test
 | `test/structure.test.js` | whole-repo invariants: syntax, module graph, dependency hygiene, no committed secrets |
 | `test/logging.test.js` | libsignal's session churn staying silenced while decrypt failures still print — driven against the real libsignal `SessionRecord` |
 | `test/startup.test.js` | the paired-bot startup card (prefix, owner, platform, counts) and the single-source platform detection behind `global.platform` |
+| `test/log.test.js` | the console policy: `debug` silent unless `DEBUG=true`, `info`/`error` always shown, errors on stderr, the hot paths routed correctly, and that no failure line sits behind a debug gate |
 | `test/reconnect.test.js` | the reconnect policy: 428 retried fast and kept out of the conflict counter, 440/409 still backing off hard, the 503/408/500 lanes, and that no status ever ends in "stop" — plus the watchdog's rules (paired only, never mid-pairing, never in front of a scheduled retry) |
 | `test/uptime.test.js` | uptime across restarts: sessions accumulate, the restart gap is not credited, a stale heartbeat is not counted up to now, per-bot isolation, clock skew, and what `.up` renders |
 | `test/clean.test.js` | `.clean` reading the antidelete replay cache: newest-first deletion, reply-narrows-to-one-sender, bad-input rejection, and that the module requires no entry point and never ends the process |

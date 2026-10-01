@@ -4,7 +4,10 @@
  * Fixes restart persistence (immediate registry save + auth scan)
  */
 'use strict';
-require('dotenv').config();
+// quiet: true — dotenv 17 prints a banner ("injected env (N) from .env // tip: …")
+// on every boot, which is the kind of line the console policy exists to keep
+// out. Fail-safe on older versions that do not know the option.
+try { require('dotenv').config({ quiet: true }); } catch (_) { require('dotenv').config(); }
 // libsignal (bundled with Baileys) logs session churn straight to console.*,
 // bypassing the pino logger, and the SessionEntry dumps flood hosted consoles.
 // Must run before any socket is created; JUNE_LIBSIGNAL_LOG=1 disables it.
@@ -31,6 +34,7 @@ const { purgeBot } = require('./platform/purge');
 const coldArchive = require('./utils/coldArchive');
 const uptime = require('./utils/uptime');
 const reconnectPolicy = require('./platform/reconnect');
+const log = require('./utils/log');
 
 const RAW_PORT = process.env.SERVER_PORT || process.env.PTERODACTYL_PORT || process.env.PORT || '3000';
 const PORT = Number(RAW_PORT) || 3000;
@@ -84,7 +88,7 @@ function getWdpHandler() {
             globalHandler = require('./handler');
             debugLog(`[ WDP ] Handler loaded — ${commandCount()} commands + ${aliasCount()} aliases (shared across ${MAX_BOTS} bots)`);
         } catch (e) {
-            console.log('[ WDP ] Handler load failed:', e.message, e.stack?.slice(0,300));
+            log.error('[ WDP ] Handler load failed:', e.message, e.stack?.slice(0,300));
         }
     }
     return { handler: globalHandler };
@@ -101,13 +105,13 @@ function getWdpHandler() {
 async function handleMessage(bot, sock, msg) {
     const { handler } = getWdpHandler();
     if (!handler) {
-        console.log(`[ WDP ] No handler for ${bot.id}`);
+        log.debug(`[ WDP ] No handler for ${bot.id}`);
         return;
     }
     // WDP handler exports { handleMessage, ... } not a function
     const fn = handler.handleMessage || handler;
     if (typeof fn !== 'function') {
-        console.log(`[ WDP ] handler type ${typeof handler} keys ${Object.keys(handler).slice(0,5)}`);
+        log.debug(`[ WDP ] handler type ${typeof handler} keys ${Object.keys(handler).slice(0,5)}`);
         return;
     }
     try {
@@ -199,7 +203,7 @@ async function bootBot(botId, opts = {}) {
             if (!bot.pairing.active) { bot.pairing.active = true; bot.pairing.gen += 1; }
             const cleanPhone = String(bot.phone).replace(/\D/g, '');
             if (cleanPhone.length < 7 || cleanPhone.length > 15) {
-                console.log(`[ ${bot.id} ] Stored phone "${cleanPhone || '(empty)'}" is not a valid number — skipping pairing code`);
+                log.debug(`[ ${bot.id} ] Stored phone "${cleanPhone || '(empty)'}" is not a valid number — skipping pairing code`);
                 return;
             }
             debugLog(`[ ${bot.id} ] Waiting 3s for socket to stabilize...`);
@@ -212,7 +216,7 @@ async function bootBot(botId, opts = {}) {
             bot.pairing.lastCode = rawCode;
             bot.pairing.attempts += 1;
             if (bot.pairing.attempts >= 3) bot.pairing.exhausted = true;
-            console.log(`[ ${bot.id} ] 🔑 Pairing code: ${rawCode} (${formatted}) for ${cleanPhone}`);
+            log.info(`[ ${bot.id} ] 🔑 Pairing code: ${rawCode} (${formatted}) for ${cleanPhone}`);
             platformBridge.emitPairingCode(bot, rawCode, { attempt: bot.pairing.attempts, gen: bot.pairing.gen, formatted });
             try { slots.setCode(bot.id, rawCode, bot.pairing.attempts, 3); } catch (_) {}
         } catch (e) {
@@ -253,7 +257,7 @@ async function bootBot(botId, opts = {}) {
                 bot._reconnecting = false;
                 bot.err503 = 0; bot.err408 = 0; bot.errConflict = 0;
                 try { coldArchive.touch(bot.id); } catch (_) {}
-                console.log(`[ ${bot.id} ] ✅ Connected as ${bot.accountNumber || sock.user?.id}`);
+                log.info(`[ ${bot.id} ] ✅ Connected as ${bot.accountNumber || sock.user?.id}`);
                 await registry.markPaired(bot.id, bot.accountNumber).catch(() => {});
                 try { slots.setPaired(bot.id, bot.accountNumber); } catch (_) {}
                 // Send startup message via WDP style
@@ -267,7 +271,7 @@ async function bootBot(botId, opts = {}) {
                     if (selfJid) {
                       await sock.sendMessage(selfJid, { text: buildStartupCard(fields) });
                     }
-                } catch (e) { console.log(`[ ${bot.id} ] Startup msg failed: ${e.message}`); }
+                } catch (e) { log.debug(`[ ${bot.id} ] Startup msg failed: ${e.message}`); }
             }
 
             if (connection === 'close') {
@@ -289,7 +293,7 @@ async function bootBot(botId, opts = {}) {
                         lastDisconnect?.error?.output?.payload?.message || ''
                     ).toLowerCase();
                     if (dmsg.includes('conflict')) {
-                        console.log(`[ ${bot.id} ] 401 conflict — another client took over; session kept, reconnect in 15s`);
+                        log.info(`[ ${bot.id} ] 401 conflict — another client took over; session kept, reconnect in 15s`);
                         bot.state = 'connecting';
                         bot.lastError = '401 conflict (takeover)';
                         bot._reconnecting = true;
@@ -297,7 +301,7 @@ async function bootBot(botId, opts = {}) {
                         if (stale()) return;
                         bootBot(bot.id, { force: true })
                             .then(() => { bot._reconnecting = false; })
-                            .catch(e => { console.log(`[ ${bot.id} ] Conflict reconnect failed: ${e.message}`); bot._reconnecting = false; });
+                            .catch(e => { log.error(`[ ${bot.id} ] Conflict reconnect failed: ${e.message}`); bot._reconnecting = false; });
                         return;
                     }
                     debugLog(`[ ${bot.id} ] 401 logged out — purging everything for this botId`);
@@ -317,9 +321,9 @@ async function bootBot(botId, opts = {}) {
                 bot.reconnectAt = Date.now() + waitMs;
 
                 if (plan.lane === 'slow') {
-                    console.log(`[ ${bot.id} ] ${bot.reconnectCount} consecutive closes — slow lane, retrying every ${Math.round(waitMs / 1000)}s (status ${statusCode})`);
+                    log.debug(`[ ${bot.id} ] ${bot.reconnectCount} consecutive closes — slow lane, retrying every ${Math.round(waitMs / 1000)}s (status ${statusCode})`);
                 } else {
-                    console.log(`[ ${bot.id} ] Reconnect #${bot.reconnectCount} in ${Math.round(waitMs / 1000)}s (status ${statusCode}) ${reason}`);
+                    log.debug(`[ ${bot.id} ] Reconnect #${bot.reconnectCount} in ${Math.round(waitMs / 1000)}s (status ${statusCode}) ${reason}`);
                 }
                 bot.state = 'connecting';
                 bot.stateAt = Date.now();
@@ -328,9 +332,9 @@ async function bootBot(botId, opts = {}) {
                 if (stale()) return;
                 bootBot(bot.id, { force: true })
                     .then(() => { bot._reconnecting = false; })
-                    .catch(e => { console.log(`[ ${bot.id} ] Reconnect failed: ${e.message}`); bot._reconnecting = false; });
+                    .catch(e => { log.error(`[ ${bot.id} ] Reconnect failed: ${e.message}`); bot._reconnecting = false; });
             }
-        } catch (e) { console.log(`[ ${bot.id} ] conn.update error: ${e.message}`); }
+        } catch (e) { log.error(`[ ${bot.id} ] conn.update error: ${e.message}`); }
     });
 
     sock.ev.on('messages.upsert', async ({ messages }) => {
@@ -416,7 +420,7 @@ sessionService.configure({
                 pairing: { active: false, attempts: 0, exhausted: false, phone: (e.phone || '').replace(/\D/g, ''), lastCode: null, gen: 0, _requested: false },
             };
             bots.set(id, bot);
-            bootBot(id).catch(e => console.log(`[ RESTORE ] ${id} boot failed: ${e.message}`));
+            bootBot(id).catch(e => log.error(`[ RESTORE ] ${id} boot failed: ${e.message}`));
             restored.push(id);
         }
         return { ok: true, restored };
@@ -428,7 +432,7 @@ sessionService.configure({
         try { bot.sock?.ev?.removeAllListeners?.(); bot.sock?.end?.(new Error(reason || 'removed')); } catch (_) {}
         bots.delete(id);
         try { fs.rmSync(path.join(AUTH_ROOT, id), { recursive: true, force: true }); } catch (_) {}
-        console.log(`[ ${id} ] 🗑️ Removed (${reason})`);
+        log.debug(`[ ${id} ] 🗑️ Removed (${reason})`);
         return { ok: true, id };
     },
     async stop(botId) {
@@ -463,13 +467,13 @@ const server = http.createServer(app);
 
 (async () => {
     getWdpHandler(); // loads handler.js, which owns the single shared command Map
-    console.log(`[ BOOT ] Commands ready — ${commandCount()} commands + ${aliasCount()} aliases`);
+    log.debug(`[ BOOT ] Commands ready — ${commandCount()} commands + ${aliasCount()} aliases`);
 })();
 
 attachPlatform(app, server).then(async () => {
     try {
         let active = [];
-        try { active = await registry.listActive(); } catch(e){ console.log('[ BOOT ] Registry list failed', e.message); }
+        try { active = await registry.listActive(); } catch(e){ log.error('[ BOOT ] Registry list failed', e.message); }
         // Pass original registry records (with webManaged) to sessionService
         let entries = active;
         let source = 'registry';
@@ -480,7 +484,7 @@ attachPlatform(app, server).then(async () => {
                         try { return fs.statSync(path.join(AUTH_ROOT, n)).isDirectory(); } catch { return false; }
                     });
                     if (dirs.length) {
-                        console.log(`[ BOOT ] Registry empty but found ${dirs.length} auth folder(s) — restoring from auth scan (wdp-style)`);
+                        log.debug(`[ BOOT ] Registry empty but found ${dirs.length} auth folder(s) — restoring from auth scan (wdp-style)`);
                         entries = [];
                         for (const dir of dirs) {
                             entries.push({ botId: dir, id: dir, phone: null, mode: 'code', webManaged: true, restoreOnly: true });
@@ -489,22 +493,22 @@ attachPlatform(app, server).then(async () => {
                         source = 'auth scan';
                     }
                 }
-            } catch (e) { console.log('[ BOOT ] Auth scan failed:', e.message); }
+            } catch (e) { log.error('[ BOOT ] Auth scan failed:', e.message); }
         }
         if (entries.length) {
             const coldOnes = entries.filter((e) => coldArchive.isArchived(e.id));
             if (coldOnes.length) {
-                console.log(`[ BOOT ] ${coldOnes.length} bot(s) cold on GitHub — skipped (wake via panel/reconnect): ${coldOnes.map((e) => e.id).join(', ')}`);
+                log.debug(`[ BOOT ] ${coldOnes.length} bot(s) cold on GitHub — skipped (wake via panel/reconnect): ${coldOnes.map((e) => e.id).join(', ')}`);
                 entries = entries.filter((e) => !coldArchive.isArchived(e.id));
             }
-            console.log(`[ BOOT ] Restoring ${entries.length} persisted session(s) from ${source}...`);
+            log.debug(`[ BOOT ] Restoring ${entries.length} persisted session(s) from ${source}...`);
             const res = await sessionService.restorePersisted(entries);
             debugLog(`[ BOOT ] Restore result: ${JSON.stringify(res)} — bots now ${bots.size}`);
         } else {
-            console.log('[ BOOT ] No persisted sessions — waiting for web pairing at /');
+            log.debug('[ BOOT ] No persisted sessions — waiting for web pairing at /');
         }
     } catch (e) {
-        console.log('[ BOOT ] Restore failed:', e.message, e.stack?.slice(0,300));
+        log.error('[ BOOT ] Restore failed:', e.message, e.stack?.slice(0,300));
     }
     server.listen(PORT, '0.0.0.0', () => {
         // ── Chalked boot banner ──────────────────────────────────────────────
@@ -554,7 +558,7 @@ attachPlatform(app, server).then(async () => {
         );
         console.log(bar + '\n');
     });
-}).catch(err => { console.error('[ BOOT ] Platform attach failed:', err); process.exit(1); });
+}).catch(err => { log.error('[ BOOT ] Platform attach failed:', err); process.exit(1); });
 
 app.get('/health', (_, res) => res.status(200).send('OK'));
 app.get('/health/details', (_, res) => {
@@ -601,14 +605,14 @@ function startBotWatchdog() {
             for (const bot of bots.values()) {
                 if (!reconnectPolicy.shouldRevive(bot, now)) continue;
                 if (bot.reconnectAt && now < bot.reconnectAt) continue;   // backoff still running
-                console.log(`[ ${bot.id} ] Watchdog: not connected and not retrying — forcing a reconnect`);
+                log.debug(`[ ${bot.id} ] Watchdog: not connected and not retrying — forcing a reconnect`);
                 bot.reconnectCount = 0;
                 bot._reconnecting = true;
                 bootBot(bot.id, { force: true })
                     .then(() => { bot._reconnecting = false; })
-                    .catch((e) => { bot._reconnecting = false; console.log(`[ ${bot.id} ] Watchdog reconnect failed: ${e.message}`); });
+                    .catch((e) => { bot._reconnecting = false; log.error(`[ ${bot.id} ] Watchdog reconnect failed: ${e.message}`); });
             }
-        } catch (e) { console.log(`[ WATCHDOG ] ${e.message}`); }
+        } catch (e) { log.error(`[ WATCHDOG ] ${e.message}`); }
     }, 60_000);
     botWatchdog.unref?.();   // never hold the process open
     return botWatchdog;
@@ -619,7 +623,7 @@ let closeStarted = false;
 async function closeEverything() {
     if (closeStarted) return { ok: true, already: true };
     closeStarted = true;
-    console.log('\n[ SHUTDOWN ] Stopping...');
+    log.info('\n[ SHUTDOWN ] Stopping...');
     try {
         for (const bot of bots.values()) { try { bot.sock?.ev?.removeAllListeners?.(); bot.sock?.end?.(); } catch (_) {} }
         const { shutdownPlatform } = require('./platform');
