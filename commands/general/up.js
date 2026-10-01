@@ -5,6 +5,7 @@
 const os = require('os');
 const database = require('../../database');
 const sessionService = require('../../platform/sessionService');
+const uptime = require('../../utils/uptime');
 
 /**
  * Detect the platform where the bot is running
@@ -72,20 +73,26 @@ module.exports = {
       const platform = detectPlatform();
       const processUptime = formatUptime(process.uptime());
 
-      // Per-bot online time. Every bot here lives in ONE Node process, so
-      // process.uptime() alone makes all bots report the same number — the
-      // exact thing two paired phones side by side immediately expose.
-      // Each bot entry stamps connectedAt when its socket opens; that is
-      // THIS bot's uptime. currentBotId() comes from the async-local dispatch
-      // context, so concurrent messages on different bots cannot race.
+      // Per-bot online time, PERSISTED (utils/uptime.js). Every bot here lives
+      // in ONE Node process, so process.uptime() is the same number for all of
+      // them and resets whenever the process does — which meant a 16-second
+      // .upgrade swap made a bot that had been online for days report "29
+      // seconds". The stored total survives the restart; the gap where the bot
+      // was actually offline does not count toward it.
       let botUptime = null;
+      let sessionUptime = null;
+      let firstSeen = null;
       let botLabel = '';
       try {
-        const bot = sessionService.get(database.currentBotId());
-        if (bot?.connectedAt) {
-          botUptime = formatUptime(Math.max(0, (Date.now() - bot.connectedAt) / 1000));
-          if (bot.accountNumber) botLabel = ` (${bot.accountNumber})`;
+        const botId = database.currentBotId();
+        const snap = uptime.snapshot(botId);
+        if (snap && snap.totalMs > 0) {
+          botUptime = formatUptime(snap.totalMs / 1000);
+          sessionUptime = formatUptime(snap.sessionMs / 1000);
+          firstSeen = snap.firstSeenAt ? new Date(snap.firstSeenAt) : null;
         }
+        const bot = sessionService.get(botId);
+        if (bot?.accountNumber) botLabel = ` (${bot.accountNumber})`;
       } catch (_) { /* outside the platform (tests, standalone) — fall back */ }
 
       // Memory is process-wide by nature: one process hosts every bot, so
@@ -97,6 +104,8 @@ module.exports = {
       const lines = [``, `⏰ Running on* ✓${platform}✓*`];
       if (botUptime) {
         lines.push(`🤖 *This bot online for:* ${botUptime}${botLabel}`);
+        lines.push(`↳ *This session:* ${sessionUptime}`);
+        if (firstSeen) lines.push(`↳ *First seen:* ${firstSeen.toLocaleString()}`);
         lines.push(`⚙️ *Server process up:* ${processUptime} (shared by every bot here)`);
       } else {
         lines.push(`⚙️ *Up for:* ${processUptime}`);

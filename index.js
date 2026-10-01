@@ -29,6 +29,7 @@ const sessionService = require('./platform/sessionService');
 const slots = require('./platform/slots');
 const { purgeBot } = require('./platform/purge');
 const coldArchive = require('./utils/coldArchive');
+const uptime = require('./utils/uptime');
 
 const RAW_PORT = process.env.SERVER_PORT || process.env.PTERODACTYL_PORT || process.env.PORT || '3000';
 const PORT = Number(RAW_PORT) || 3000;
@@ -236,6 +237,10 @@ async function bootBot(botId, opts = {}) {
                 bot.pairingDone = true;
                 bot.state = 'connected';
                 bot.connectedAt = Date.now();
+                // Persist the session start: an upgrade swap must not reset this
+                // bot's uptime to zero. Also closes the previous session, which
+                // is how a killed process's uptime survives at all.
+                try { await uptime.markOnline(bot.id); } catch (_) {}
                 bot.accountNumber = sock.user?.id?.split(':')[0]?.split('@')[0] || bot.accountNumber || null;
                 bot.lastError = null;
                 bot.pairing.active = false;
@@ -543,6 +548,9 @@ attachPlatform(app, server).then(async () => {
             },
         });
         coldArchive.start();
+        // Keeps each connected bot's uptime liveness stamp fresh, so an
+        // outage is never credited as uptime after a restart.
+        uptime.startHeartbeat();
         if (coldArchive.enabled()) {
             console.log(
                 `${tick}${label('COLD')} ${val('GitHub warehouse:')} ${chalk.bold.cyan(coldArchive.CFG.repo)} ` +
