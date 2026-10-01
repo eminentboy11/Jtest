@@ -105,7 +105,24 @@ function sync(reason = 'sync') {
   return { pushed: r.status === 0, restored: true, out: r.out.slice(0, 300) };
 }
 
-/** Interval sync + flush-on-shutdown. Returns handles for embedding. */
+/**
+ * Interval sync + flush-on-shutdown. Returns handles for embedding.
+ *
+ * The shutdown handler flushes and NOTHING ELSE — it must not call
+ * process.exit(). Two reasons:
+ *
+ *   1. index.js owns process shutdown. Its own SIGTERM/SIGINT handler closes
+ *      every bot socket, flushes the store and closes the HTTP server before
+ *      exiting. A second handler that force-exits would win that race and skip
+ *      the graceful close — in a process running up to 100 bots, that is 100
+ *      dropped sockets to save a data-push.
+ *   2. gitSync is embedded (coldArchive drives it), so it has no business
+ *      deciding when the process dies.
+ *
+ * This path is currently unreachable anyway — coldArchive.start() registers its
+ * own handlers and never calls this function — which is exactly why it was
+ * worth defusing before someone wires it up.
+ */
 function start(onLog = () => {}) {
   const tick = () => {
     try { const r = sync('interval'); onLog(r.pushed ? 'pushed' : 'idle', r.out); }
@@ -113,7 +130,7 @@ function start(onLog = () => {}) {
   };
   const t = setInterval(tick, CFG.intervalMin * 60_000);
   t.unref?.();
-  const bye = () => { try { sync('shutdown'); } catch (_) {} process.exit(0); };
+  const bye = () => { try { sync('shutdown'); } catch (_) {} };
   process.on('SIGTERM', bye);
   process.on('SIGINT', bye);
   return { sync, stop: () => clearInterval(t) };

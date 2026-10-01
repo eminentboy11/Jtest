@@ -384,7 +384,7 @@ Fully web-based edition — nothing like switching mode through env.
 npm test
 ```
 
-265 tests across 15 suites, using Node's built-in runner — no test framework dependency. Runs serially (`--test-concurrency=1`) because the loader suite writes real temporary files into `commands/`.
+270 tests across 16 suites, using Node's built-in runner — no test framework dependency. Runs serially (`--test-concurrency=1`) because the loader suite writes real temporary files into `commands/`.
 
 | suite | covers |
 |---|---|
@@ -395,6 +395,7 @@ npm test
 | `test/structure.test.js` | whole-repo invariants: syntax, module graph, dependency hygiene, no committed secrets |
 | `test/logging.test.js` | libsignal's session churn staying silenced while decrypt failures still print — driven against the real libsignal `SessionRecord` |
 | `test/startup.test.js` | the paired-bot startup card (prefix, owner, platform, counts) and the single-source platform detection behind `global.platform` |
+| `test/clean.test.js` | `.clean` reading the antidelete replay cache: newest-first deletion, reply-narrows-to-one-sender, bad-input rejection, and that the module requires no entry point and never ends the process |
 | `test/dev-commands.test.js` | the process commands: silence for every non-allowed sender (no reply, no reaction), the `@lid`/`participantAlt` match, `.upgrade` refusing to exit with no loader, `.shutdown` closing every socket then exiting `45`, and `.restart` reconnecting one bot while never calling `process.exit` |
 
 `test/structure.test.js` is the one worth reading if you change the build. It exists because two npm scripts pointed at files that were not in the repo, and nothing caught it:
