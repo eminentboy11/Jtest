@@ -23,6 +23,7 @@ Previous edition was **9MB + 700 deps (48 packages, ffmpeg, sharp, jimp, ytdl, s
   - `.restart` — that bot's **owner**, and it reboots **only the bot the message arrived on** (`sessionService.reconnect(botId)`); other tenants never notice. It cannot fetch new code — only `.upgrade` re-syncs. Non-owners are ignored silently
   - see **Loader protocol** below for the exit codes and the loader-side contract
 - **A 428 no longer costs uptime** — `428 connectionClosed` is an ordinary server-side close, and the answer is to come straight back. It used to be grouped with `440`/`409` (a genuine duplicate session) and cost 15-120 s offline each time. Worse, ten consecutive closes parked the bot in a terminal `waiting` state that nothing read, so it stayed dark until the container was restarted — the "bot goes off after about a day" report. The policy (`platform/reconnect.js`) now retries a transient close in ~2-6 s with jitter, moves to a 5-minute slow lane after ten attempts instead of stopping, and a 60 s **watchdog** forces any paired bot that is down and not retrying back online. It never interrupts pairing, and never touches a deliberate stop
+- **The data backup is driven by the loader, and it actually runs** — `JUNE_DATA_REPO` is baked in (`eminentboy11/june-web-data`), so a deployment sets only `JUNE_DATA_TOKEN`. The token is the switch: no token, no git command. The loader starts the sync once and keeps it running across every `.upgrade`/`.restart`, so a backup no longer depends on the bot process surviving — the bot's own interval sync had no caller at all, and cold storage only pushed when it archived an idle bot, which a healthy deployment never does. A bare `owner/repo` slug is expanded to a GitHub URL; local paths and ssh remotes pass through untouched
 - **Per-bot uptime that survives a restart** — an `.upgrade` swap is ~16 seconds, but it used to reset every bot's uptime to zero: the counter came from the in-memory socket. Each bot now stores its own total (sessions accumulate, `utils/uptime.js`), and a session is credited only up to the last proof of life, so an outage is never counted as uptime. `.up` shows the total, the current session and when the bot was first seen, next to the process figure
 - **391 commands shipped** behind a real hot-reloading loader — drop a file in `commands/` and it registers without a restart:
   - health: `.ping`, `.uptime`
@@ -399,7 +400,7 @@ Fully web-based edition — nothing like switching mode through env.
 npm test
 ```
 
-311 tests across 19 suites, using Node's built-in runner — no test framework dependency. Runs serially (`--test-concurrency=1`) because the loader suite writes real temporary files into `commands/`.
+329 tests across 20 suites, using Node's built-in runner — no test framework dependency. Runs serially (`--test-concurrency=1`) because the loader suite writes real temporary files into `commands/`.
 
 | suite | covers |
 |---|---|
@@ -410,6 +411,7 @@ npm test
 | `test/structure.test.js` | whole-repo invariants: syntax, module graph, dependency hygiene, no committed secrets |
 | `test/logging.test.js` | libsignal's session churn staying silenced while decrypt failures still print — driven against the real libsignal `SessionRecord` |
 | `test/startup.test.js` | the paired-bot startup card (prefix, owner, platform, counts) and the single-source platform detection behind `global.platform` |
+| `test/datasync.test.js` | the warehouse config: the repo is the baked-in slug, a slug expands to a URL while paths and ssh remotes pass through, and the token is the switch (https needs one, local and ssh do not) |
 | `test/log.test.js` | the console policy: `debug` silent unless `DEBUG=true`, `info`/`error` always shown, errors on stderr, the hot paths routed correctly, and that no failure line sits behind a debug gate |
 | `test/reconnect.test.js` | the reconnect policy: 428 retried fast and kept out of the conflict counter, 440/409 still backing off hard, the 503/408/500 lanes, and that no status ever ends in "stop" — plus the watchdog's rules (paired only, never mid-pairing, never in front of a scheduled retry) |
 | `test/uptime.test.js` | uptime across restarts: sessions accumulate, the restart gap is not credited, a stale heartbeat is not counted up to now, per-bot isolation, clock skew, and what `.up` renders |
