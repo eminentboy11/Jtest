@@ -137,19 +137,27 @@ function ensure() {
   if (!fs.existsSync(ig)) fs.writeFileSync(ig, IGNORE);
 }
 
-/** Tracked paths this working tree does not have. */
-function missingPaths() {
+/** Tracked paths this working tree does not have, minus anything excluded. */
+function missingPaths(except = []) {
   const listed = spawnSync('git', ['ls-files', '--deleted', '-z'], { cwd: CFG.dir, encoding: 'utf8' });
-  return String(listed.stdout || '').split('\0').filter(Boolean);
+  return String(listed.stdout || '')
+    .split('\0')
+    .filter(Boolean)
+    .filter((p) => !except.some((x) => p === x || p.startsWith(x.endsWith('/') ? x : `${x}/`)));
 }
 
 /**
  * Put back the tracked files this tree is missing — and only those. A file that
  * is present is never touched: it may hold a write that has not been committed
- * yet, and the working tree here is live bot data.
+ * yet, and in the loader's working tree that is live bot data.
+ *
+ * Must run AFTER the index has been moved to the warehouse tip: `ls-files
+ * --deleted` compares the index against the working tree, so against a stale
+ * index — or the empty one a `--no-checkout` clone leaves behind — it reports
+ * nothing and silently restores nothing.
  */
-function checkoutMissing() {
-  const missing = missingPaths();
+function checkoutMissing(except = []) {
+  const missing = missingPaths(except);
   if (missing.length) git(['checkout', '--', ...missing]);
   return missing;
 }
@@ -168,18 +176,18 @@ function checkoutMissing() {
  * not: the cold archive wants them (it reads tarballs back out of its clone),
  * the loader does not (its working tree is the live data directory).
  */
-function pull({ materialize = true } = {}) {
+function pull({ materialize = true, except = [] } = {}) {
   const ref = `origin/${BRANCH}`;
   const fetched = git(['fetch', 'origin', BRANCH]);
   const have = git(['rev-parse', '--verify', '--quiet', ref]);
   if (fetched.status !== 0 || have.status !== 0) {
-    return { status: 0, out: 'no remote branch yet', healed: false, moved: false };
+    return { status: 0, out: 'no remote branch yet', healed: false, moved: false, restored: 0 };
   }
 
   const before = git(['rev-parse', '--verify', '--quiet', 'HEAD']).out.trim();
-  if (materialize) checkoutMissing();                 // before the reset clears the list
   const reset = git(['reset', '--mixed', ref]);
   const after = git(['rev-parse', '--verify', '--quiet', 'HEAD']).out.trim();
+  const restored = materialize ? checkoutMissing(except).length : 0;
 
   // A branch that is not an ancestor of the warehouse tip was not based on it:
   // the local repo opened with its own root commit and could never fast-forward
@@ -189,7 +197,39 @@ function pull({ materialize = true } = {}) {
     status: reset.status,
     out: reset.out,
     moved: before !== after,
+    restored,
     healed: before !== '' && !based,
+  };
+}
+
+/**
+ * Disaster restore: refill a data directory that has nothing of its own in it.
+ *
+ * This is the Replit case — a published app's filesystem is a fresh container
+ * every deploy, so the stores are gone and the warehouse is the only copy. It
+ * runs before the bot starts, so the bot boots with its settings already there.
+ *
+ * It fires ONLY on a directory whose only contents are the repo scaffold. Any
+ * other contents mean "not a fresh machine", and nothing in the warehouse
+ * distinguishes a store that was deliberately purged from one that was never
+ * backed up here — so a restore on top of live data is how purged bots come
+ * back from the dead. A directory with stores in it is left alone.
+ */
+function restore({ except = [] } = {}) {
+  if (!CFG.dir || !CFG.remote) throw new Error('GIT_SYNC_DIR and GIT_SYNC_REMOTE are required');
+  const present = fs.existsSync(CFG.dir)
+    ? fs.readdirSync(CFG.dir).filter((f) => f !== '.git' && f !== '.gitignore')
+    : [];
+  if (present.length) {
+    return { restored: 0, repaired: false, skipped: 'not-a-fresh-directory', out: `${present.length} local entries — left alone` };
+  }
+  ensure();
+  const adopted = pull({ materialize: true, except });
+  return {
+    restored: adopted.restored,
+    repaired: adopted.healed,
+    skipped: null,
+    out: adopted.restored ? `restored ${adopted.restored} file(s)` : adopted.out,
   };
 }
 
@@ -251,7 +291,7 @@ function sync(reason = 'sync') {
   if (!CFG.dir || !CFG.remote) throw new Error('GIT_SYNC_DIR and GIT_SYNC_REMOTE are required');
   ensure();
   const adopted = pull({ materialize: false });
-  const absent = missingPaths();
+  const absent = missingPaths();          // held back from the commit — see below
   const note = adopted.healed ? 'repaired local branch onto the warehouse tip; ' : '';
   const msg = `sync: ${reason} @ ${new Date().toISOString()}`;
   if (!commitAll(msg, absent)) return { pushed: false, restored: true, healed: adopted.healed, out: `${note}no local changes` };
@@ -298,7 +338,7 @@ function start(onLog = () => {}) {
 /** Embedder config (coldArchive uses this instead of env). */
 function configure(opts = {}) { Object.assign(CFG, opts); }
 
-module.exports = { sync, start, pull, git, CFG, BRANCH, DEFAULT_DATA_REPO, remoteUrl, configure, ensure, commitAll, push };
+module.exports = { sync, start, restore, pull, git, CFG, BRANCH, DEFAULT_DATA_REPO, remoteUrl, configure, ensure, commitAll, push };
 
 if (require.main === module) {
   const r = sync(process.argv[2] || 'manual');

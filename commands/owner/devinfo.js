@@ -182,6 +182,9 @@ module.exports = {
         if (s.intervalMin) lines.push(`↳ Interval: ${s.intervalMin}m`);
         if (s.lastRunAt) lines.push(`↳ Last: ${s.lastRunAt}`);
         if (s.lastError) lines.push(`↳ Error: ${s.lastError}`);
+        if (s.restoredFiles) {
+          lines.push(`↳ Restored ${s.restoredFiles} file(s) at boot${s.restoredAt ? ` (${s.restoredAt})` : ''}`);
+        }
         if (s.pid) lines.push(`↳ Loader pid: ${s.pid}${s.pid === process.ppid ? ' (this bot\'s parent ✓)' : ''}`);
       }
 

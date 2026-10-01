@@ -95,22 +95,23 @@ function unrelatedWriterPush(files, branch = 'main') {
 }
 
 /** Another writer (the bot's cold archive) pushes from its own working tree. */
-function otherWriterPush(files) {
-  if (!fs.existsSync(path.join(ARCHIVE, '.git'))) {
-    fs.mkdirSync(ARCHIVE, { recursive: true });
-    ok(['clone', '-q', REMOTE, ARCHIVE], ROOT);
-    ok(['config', 'user.email', 'archive@test'], ARCHIVE);
-    ok(['config', 'user.name', 'archive'], ARCHIVE);
+function otherWriterPush(files, dir = ARCHIVE) {
+  const ARCHIVE_DIR = dir;
+  if (!fs.existsSync(path.join(ARCHIVE_DIR, '.git'))) {
+    fs.mkdirSync(ARCHIVE_DIR, { recursive: true });
+    ok(['clone', '-q', REMOTE, ARCHIVE_DIR], ROOT);
   }
-  ok(['fetch', 'origin', 'main'], ARCHIVE);
-  ok(['reset', '--hard', 'origin/main'], ARCHIVE);
+  ok(['config', 'user.email', 'archive@test'], ARCHIVE_DIR);
+  ok(['config', 'user.name', 'archive'], ARCHIVE_DIR);
+  ok(['fetch', 'origin', 'main'], ARCHIVE_DIR);
+  ok(['reset', '--hard', 'origin/main'], ARCHIVE_DIR);
   for (const [name, body] of Object.entries(files)) {
-    fs.mkdirSync(path.dirname(path.join(ARCHIVE, name)), { recursive: true });
-    fs.writeFileSync(path.join(ARCHIVE, name), body);
+    fs.mkdirSync(path.dirname(path.join(ARCHIVE_DIR, name)), { recursive: true });
+    fs.writeFileSync(path.join(ARCHIVE_DIR, name), body);
   }
-  ok(['add', '-A'], ARCHIVE);
-  ok(['commit', '-m', 'archive'], ARCHIVE);
-  ok(['push', '-q', 'origin', 'main:main'], ARCHIVE);
+  ok(['add', '-A'], ARCHIVE_DIR);
+  ok(['commit', '-m', 'archive'], ARCHIVE_DIR);
+  ok(['push', '-q', 'origin', 'main:main'], ARCHIVE_DIR);
 }
 
 describe('gitSync heals the failure that used to repeat', () => {
@@ -280,18 +281,102 @@ describe('gitSync heals the failure that used to repeat', () => {
     // its pull must put missing files on disk — the loader's must not.
     freshWarehouse();
     otherWriterPush({ 'bots/cold-1.tar.gz': 'ARCHIVE' });
+    // A genuinely empty clone directory. (Deleting only .git would leave the
+    // tarball sitting on disk from the writer above and prove nothing.)
+    fs.rmSync(ARCHIVE, { recursive: true, force: true });
     fs.mkdirSync(ARCHIVE, { recursive: true });
-    fs.rmSync(path.join(ARCHIVE, '.git'), { recursive: true, force: true });
-    fs.mkdirSync(path.join(ARCHIVE, 'meta', 'hosts'), { recursive: true });
-    fs.writeFileSync(path.join(ARCHIVE, 'meta', 'hosts', 'vps1.json'), '{}');
 
     const gitSync = freshSync(ARCHIVE);
-    assert.equal(gitSync.ensure(), undefined);
-    gitSync.pull();
+    gitSync.ensure();
+    const r = gitSync.pull();
     assert.equal(
       fs.readFileSync(path.join(ARCHIVE, 'bots', 'cold-1.tar.gz'), 'utf8'),
       'ARCHIVE',
       'the tarball is checked out into the archive clone'
     );
+    assert.ok(r.restored >= 1, JSON.stringify(r));
+  });
+
+  test('a clone that is behind the tip still gets files another writer added', () => {
+    // The multi-host case: VPS-A archives a bot, VPS-B's clone has never seen
+    // that tarball. Its HEAD is behind, and against a stale index nothing looks
+    // missing — so materialising has to happen after the index moves to the tip.
+    freshWarehouse();
+    fs.mkdirSync(ARCHIVE, { recursive: true });
+    ok(['clone', '-q', REMOTE, ARCHIVE], ROOT);       // full clone, level with the tip
+    // ...and then a DIFFERENT directory pushes, so ARCHIVE is now behind.
+    otherWriterPush({ 'bots/cold-9.tar.gz': 'LATE' }, path.join(ROOT, 'writer3'));
+
+    const gitSync = freshSync(ARCHIVE);
+    const r = gitSync.pull();
+    assert.equal(fs.readFileSync(path.join(ARCHIVE, 'bots', 'cold-9.tar.gz'), 'utf8'), 'LATE');
+    assert.equal(r.restored, 1, JSON.stringify(r));
+  });
+
+  test('restore refills a wiped data directory, minus the archive trees', () => {
+    freshWarehouse();
+    otherWriterPush({ 'bots/cold-1.tar.gz': 'ARCHIVE', 'meta/hosts/vps1.json': '{}' });
+    fs.mkdirSync(DATA, { recursive: true });
+    fs.writeFileSync(path.join(DATA, '2348154853640.json'), '{"owners":["2348154853640"]}');
+    const writer = freshSync(DATA);
+    assert.equal(writer.sync('boot').pushed, true);
+
+    // ── the Replit case: fresh container, nothing on disk ────────────────────
+    fs.rmSync(DATA, { recursive: true, force: true });
+
+    const gitSync = freshSync(DATA);
+    const r = gitSync.restore({ except: ['bots', 'meta'] });
+    // Every non-archive tracked file, and the warehouse carries a README too.
+    assert.ok(r.restored >= 1, JSON.stringify(r));
+    assert.equal(r.skipped, null);
+    assert.equal(
+      fs.readFileSync(path.join(DATA, '2348154853640.json'), 'utf8'),
+      '{"owners":["2348154853640"]}',
+      'the store came back'
+    );
+    assert.equal(fs.existsSync(path.join(DATA, 'bots')), false, 'no tarballs in the live data dir');
+    assert.equal(fs.existsSync(path.join(DATA, 'meta')), false, 'no host metadata either');
+
+    // And the next ordinary sync has nothing to add: the restore left the tree
+    // level with the warehouse.
+    assert.equal(gitSync.sync('interval').pushed, false);
+  });
+
+  test('restore leaves a data directory that has anything of its own alone', () => {
+    freshWarehouse();
+    fs.mkdirSync(DATA, { recursive: true });
+    fs.writeFileSync(path.join(DATA, '2348154853640.json'), '{"owners":["x"]}');
+    const writer = freshSync(DATA);
+    assert.equal(writer.sync('boot').pushed, true);
+
+    // A purged bot is a file the warehouse still has and this tree does not.
+    // Restoring it here would bring the purged bot back from the dead.
+    fs.rmSync(path.join(DATA, '2348154853640.json'));
+    fs.writeFileSync(path.join(DATA, 'other.json'), '{"live":true}');
+
+    const gitSync = freshSync(DATA);
+    const r = gitSync.restore({ except: ['bots', 'meta'] });
+    assert.equal(r.restored, 0, JSON.stringify(r));
+    assert.equal(r.skipped, 'not-a-fresh-directory');
+    assert.equal(fs.existsSync(path.join(DATA, '2348154853640.json')), false, 'the purged store stays purged');
+    assert.equal(fs.readFileSync(path.join(DATA, 'other.json'), 'utf8'), '{"live":true}', 'live data untouched');
+  });
+
+  test('restore never overwrites a file the bot is writing', () => {
+    freshWarehouse();
+    fs.mkdirSync(DATA, { recursive: true });
+    fs.writeFileSync(path.join(DATA, '2348154853640.json'), '{"msgs":1}');
+    const writer = freshSync(DATA);
+    assert.equal(writer.sync('boot').pushed, true);
+
+    // Wiped except for one file the bot has already rewritten locally.
+    for (const f of fs.readdirSync(DATA)) {
+      if (f !== '.git' && f !== '2348154853640.json') fs.rmSync(path.join(DATA, f), { recursive: true, force: true });
+    }
+    fs.writeFileSync(path.join(DATA, '2348154853640.json'), '{"msgs":99,"fresh":true}');
+
+    const gitSync = freshSync(DATA);
+    assert.equal(gitSync.restore({ except: ['bots', 'meta'] }).restored, 0);
+    assert.equal(fs.readFileSync(path.join(DATA, '2348154853640.json'), 'utf8'), '{"msgs":99,"fresh":true}');
   });
 });
