@@ -401,7 +401,7 @@ Fully web-based edition — nothing like switching mode through env.
 npm test
 ```
 
-342 tests across 21 suites, using Node's built-in runner — no test framework dependency. Runs serially (`--test-concurrency=1`) because the loader suite writes real temporary files into `commands/`.
+350 tests across 22 suites, using Node's built-in runner — no test framework dependency. Runs serially (`--test-concurrency=1`) because the loader suite writes real temporary files into `commands/`.
 
 | suite | covers |
 |---|---|
@@ -413,6 +413,7 @@ npm test
 | `test/logging.test.js` | libsignal's session churn staying silenced while decrypt failures still print — driven against the real libsignal `SessionRecord` |
 | `test/startup.test.js` | the paired-bot startup card (prefix, owner, platform, counts) and the single-source platform detection behind `global.platform` |
 | `test/devinfo.test.js` | `.devinfo`: silence for every non-dev sender, the full report for a dev, no token ever echoed, and the backup verdict — running, STALLED when the loader's status file has gone quiet, error, off-with-reason, and unknown rather than healthy when the file is missing or unreadable |
+| `test/gitsync.test.js` | the shapes that used to fail forever: a data directory that already has files still shares the warehouse history, a repo left on `master` with its own root commit is repaired and reports it, the reported loop (data on `main`, HEAD on another branch) heals, a sync never deletes another writer's `bots/`/`meta/` files, the live data directory is left alone, and a push that loses a race adopts the winner and retries as a fast-forward |
 | `test/datasync.test.js` | the warehouse config: the repo is the baked-in slug, a slug expands to a URL while paths and ssh remotes pass through, and the token is the switch (https needs one, local and ssh do not) |
 | `test/log.test.js` | the console policy: `debug` silent unless `DEBUG=true`, `info`/`error` always shown, errors on stderr, the hot paths routed correctly, and that no failure line sits behind a debug gate |
 | `test/reconnect.test.js` | the reconnect policy: 428 retried fast and kept out of the conflict counter, 440/409 still backing off hard, the 503/408/500 lanes, and that no status ever ends in "stop" — plus the watchdog's rules (paired only, never mid-pairing, never in front of a scheduled retry) |
