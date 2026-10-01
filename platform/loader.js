@@ -44,6 +44,54 @@ function exitDelayMs(envVar = 'JUNE_EXIT_DELAY_MS', fallback = 2000) {
   return Number.isFinite(n) && n >= 0 ? n : fallback;
 }
 
+/** Close budget. A stuck close must never hold the shutdown open. */
+const CLOSE_TIMEOUT_MS = 10_000;
+
+function withTimeout(promise, ms) {
+  return new Promise((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(`close timed out after ${ms}ms`)), ms);
+    Promise.resolve(promise).then(
+      (v) => { clearTimeout(t); resolve(v); },
+      (e) => { clearTimeout(t); reject(e); },
+    );
+  });
+}
+
+/**
+ * Run everything that must happen before the process dies, and NOTHING about
+ * how it dies — the caller picks the exit code.
+ *
+ * index.js registers the routine as `global.__JUNE_SHUTDOWN`: close every bot
+ * socket cleanly, flush the queue, flush group counters, write every bot's JSON
+ * store synchronously, release the HTTP server, close the command watcher. This
+ * is the step utils/shutdown.js described but could never actually run, because
+ * index.js never registered the global it was looking for — so every shutdown
+ * in this repo until now exited raw, mid-write.
+ *
+ * Fail-open, always: a missing routine, a throwing routine or a routine that
+ * hangs is logged and the caller still exits. A shutdown that cannot complete
+ * must never become a shutdown that does not happen.
+ *
+ * Test hooks: log, timeoutMs, exit-through `global.__JUNE_SHUTDOWN`.
+ */
+async function gracefulClose({ timeoutMs = CLOSE_TIMEOUT_MS, log = console.log } = {}) {
+  const routine = typeof global.__JUNE_SHUTDOWN === 'function' ? global.__JUNE_SHUTDOWN : null;
+
+  if (!routine) {
+    log('[ SHUTDOWN ] No close routine registered — exiting without a graceful close.');
+    return { ok: false, reason: 'no-routine' };
+  }
+
+  try {
+    await withTimeout(routine(), timeoutMs);
+    log('[ SHUTDOWN ] Graceful close finished — sockets ended, store flushed.');
+    return { ok: true };
+  } catch (error) {
+    log(`[ SHUTDOWN ] Graceful close ended with error (${error.message}) — exiting anyway.`);
+    return { ok: false, reason: error.message };
+  }
+}
+
 /**
  * Flush state, then exit with `code` after `delayMs`. `database.js` already
  * registers its own `process.on('exit')` flush (registered so groupstats'
@@ -74,6 +122,8 @@ function exitForShutdown(opts = {}) {
 module.exports = {
   QUICK_RESTART,
   STAY_DOWN,
+  CLOSE_TIMEOUT_MS,
+  gracefulClose,
   exitWith,
   exitForUpgrade,
   exitForShutdown,

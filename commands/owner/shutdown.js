@@ -6,45 +6,83 @@
  * answers that flag with an "owner only" message, which is a response. The gate
  * lives here and returns.
  *
- * WHY THIS IS NOT AN OWNER COMMAND ANY MORE
- * -----------------------------------------
- * Jtest is one process running up to 100 bots. `process.exit()` from any chat
- * therefore kills every bot, not just the one the sender is talking to — and
- * `.shutdown` kills the server on purpose. That is a dev decision, not a
- * tenant decision, so the allowlist moved to the two dev numbers. (`.restart`
- * is the command that acts on one bot only; see commands/owner/restart.js.)
+ * WHAT IT DOES, IN ORDER
+ * ----------------------
+ *   1. Tells every bot's owner, from that bot, that the server is going down.
+ *      Without this the 99 tenants who did not type the command just watch
+ *      their bot go silent — no reason, no warning. Notification is
+ *      best-effort and bounded: send failures and a slow network cannot hold
+ *      the shutdown open. JUNE_SHUTDOWN_NOTICE=0 turns it off.
+ *   2. Runs the real graceful close (platform/loader.js → global.__JUNE_SHUTDOWN,
+ *      registered by index.js): every socket ended properly, group counters
+ *      flushed, every bot's JSON store written, HTTP server released. This is
+ *      the step the old utils/shutdown.js only *described* — index.js never
+ *      registered the global it was looking for, so nothing ever ran it.
+ *   3. Exits 45: the loader keeps the bot down instead of relaunching it.
  *
- * WHY EXIT 45 AND NOT THE OLD KILL CHAIN
- * --------------------------------------
- * The chain lived in utils/shutdown.js: write a state file, exit, and let the
- * *next* boot kill itself again — three boots total — to outlast a supervisor
- * that auto-restarts everything. That was the right idea in the wrong process.
- * A bot that is exiting cannot guarantee it will be the one to come back (a
- * failed sync, a crash, a panel restart in between), so the loader owns it now:
- * exit 45 tells the loader "do not relaunch me", and the loader re-arms the
- * countdown from its own side. See README → "Loader protocol".
+ * WHY THIS IS NOT AN OWNER COMMAND
+ * --------------------------------
+ * Jtest is one process running up to 100 bots. Exiting from any chat therefore
+ * kills every bot, not just the one the sender is talking to — that is a dev
+ * decision, not a tenant decision, so the allowlist is the two dev numbers.
+ * (`.restart` is the command that acts on one bot only.)
  */
 
 const sessionService = require('../../platform/sessionService');
+const database = require('../../database');
 const loader = require('../../platform/loader');
 const { isDev } = require('../../utils/devs');
 
+const NOTICE = [
+  '🔌 *Server going offline*',
+  '',
+  'The bot platform is being shut down by its operator. This bot will be ' +
+  'offline until the server is started again — commands will not answer in ' +
+  'the meantime.',
+].join('\n');
+
+/** How long the whole notification pass may take before it is abandoned. */
+function noticeBudgetMs() {
+  const n = Number(process.env.JUNE_SHUTDOWN_NOTICE_MS);
+  return Number.isFinite(n) && n >= 0 ? n : 8000;
+}
+
 /**
- * Close every bot's socket before the process goes.
+ * DM every bot's first owner from that bot. Returns how many actually sent.
  *
- * Worth the two lines: WhatsApp notices a clean close instead of a dropped
- * connection, and the sessions do not look like a crash on the phone. A failure
- * here is never fatal — the exit happens either way.
+ * Bounded twice: a global race against noticeBudgetMs, and a per-bot try/catch,
+ * so one dead socket cannot stall the others. Nothing here is fatal — the
+ * shutdown proceeds whether this works or not.
  */
-async function closeSockets() {
-  try {
-    if (!sessionService.configured()) return;
-    for (const bot of sessionService.list()) {
-      try { await sessionService.stop(bot.id); } catch (_) { /* best effort */ }
+async function notifyOwners() {
+  if (String(process.env.JUNE_SHUTDOWN_NOTICE || '').trim() === '0') return 0;
+
+  let bots = [];
+  try { bots = sessionService.configured() ? sessionService.list() : []; } catch (_) { return 0; }
+  if (!bots.length) return 0;
+
+  const sends = bots.map(async (entry) => {
+    try {
+      const sock = sessionService.get(entry.id)?.sock;
+      if (!sock) return 0;
+      const owners = await database.runAsBot(entry.id, async () => database.getOwners());
+      if (!owners || !owners.length) return 0;
+      const first = String(owners[0]);
+      const jid = first.includes('@') ? first : `${first.replace(/\D/g, '')}@s.whatsapp.net`;
+      await sock.sendMessage(jid, { text: NOTICE });
+      return 1;
+    } catch (_) {
+      return 0;   // best effort: a bot with no socket or no owner is skipped
     }
-  } catch (error) {
-    console.error('[shutdown] socket close failed (continuing):', error.message);
-  }
+  });
+
+  const raced = await Promise.race([
+    Promise.allSettled(sends),
+    new Promise((resolve) => setTimeout(() => resolve(null), noticeBudgetMs())),
+  ]);
+
+  if (!Array.isArray(raced)) return 0;   // budget spent — do not wait any longer
+  return raced.filter((r) => r.status === 'fulfilled' && r.value === 1).length;
 }
 
 module.exports = {
@@ -63,11 +101,17 @@ module.exports = {
       await extra.reply(
         '☢️ *Shutting down.*\n\n' +
         'Every bot on this process is going offline and will stay offline until ' +
-        'the server is started again.\n' +
+        'the server is started again. Owners are being notified.\n' +
         `_Exiting with code ${loader.STAY_DOWN} (stay down)._`
       );
 
-      await closeSockets();
+      const notified = await notifyOwners();
+      if (notified) console.log(`[ SHUTDOWN ] Notified ${notified} bot owner(s).`);
+
+      // Sockets are ended, queues flushed and every store written HERE — the
+      // reply above has already gone out, so it cannot be cut off by this.
+      await loader.gracefulClose();
+
       loader.exitForShutdown();
 
     } catch (error) {
@@ -75,4 +119,7 @@ module.exports = {
       await extra.reply(`❌ Shutdown failed: ${error.message}`);
     }
   },
+
+  // exported for tests
+  _internals: { notifyOwners, noticeBudgetMs, NOTICE },
 };

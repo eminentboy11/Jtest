@@ -566,7 +566,24 @@ app.get('/status', (_, res) => {
     res.send(`<html><head><title>June X Web</title></head><body style="font-family:monospace;background:#03060c;color:#e2f0ff;padding:2rem"><h1>June X WEB EDITION — WDP full + velvet-sparrow</h1><p>${bots.size}/${MAX_BOTS} bots | WDP commands: ${commandCount()}</p><ul>${list || '<li>no bots — pair at /</li>'}</ul><p><a href="/" style="color:#00ffe0">Go to pairing gateway /</a></p></body></html>`);
 });
 
-async function shutdown() {
+/**
+ * The close routine — everything that must happen before this process dies,
+ * and NOTHING about HOW it dies.
+ *
+ * Split from the exit on purpose. SIGTERM/SIGINT exit 0; `.shutdown` exits 45
+ * so the loader keeps the bot down; `.upgrade` exits 44 so the loader re-syncs
+ * and relaunches. All three need the same close first — sockets ended properly
+ * (WhatsApp sees a clean close, not a dropped connection), group counters
+ * flushed, every bot's JSON store written, the HTTP server released, the
+ * command watcher closed.
+ *
+ * Idempotent: a SIGTERM arriving while `.shutdown` is already closing must not
+ * run the whole thing twice.
+ */
+let closeStarted = false;
+async function closeEverything() {
+    if (closeStarted) return { ok: true, already: true };
+    closeStarted = true;
     console.log('\n[ SHUTDOWN ] Stopping...');
     try {
         for (const bot of bots.values()) { try { bot.sock?.ev?.removeAllListeners?.(); bot.sock?.end?.(); } catch (_) {} }
@@ -581,8 +598,25 @@ async function shutdown() {
         // keeps the event loop alive and server.close() never completes.
         try { getWdpHandler().handler?.closeCommandWatcher?.(); } catch (_) {}
     } catch (_) {}
+    return { ok: true };
+}
+
+async function shutdown() {
+    await closeEverything();
     server.close(() => process.exit(0));
     setTimeout(() => process.exit(0), 5000).unref();
 }
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
+
+// Every shutdown path runs the SAME close through this global:
+//
+//   SIGTERM/SIGINT  → shutdown() above → closeEverything() → exit 0
+//   .shutdown       → platform/loader.js gracefulClose() → exit 45
+//   .upgrade        → platform/loader.js gracefulClose() → exit 44
+//
+// utils/shutdown.js used to look for exactly this name and never found it —
+// index.js never registered it — so its "graceful close" step logged
+// "No graceful routine registered" and exited raw every single time. That is
+// the bug this assignment fixes.
+global.__JUNE_SHUTDOWN = closeEverything;

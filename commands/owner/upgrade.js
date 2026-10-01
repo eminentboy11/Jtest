@@ -72,8 +72,12 @@ module.exports = {
         `_Exiting with code ${loader.QUICK_RESTART} (quick restart)._`
       );
 
-      // database.js's own process.on('exit') flushes the debounced store, so
-      // there is nothing to flush here.
+      // Close cleanly before exiting, exactly like .shutdown: 100 sockets
+      // dropped abruptly look like a crash to WhatsApp, and the store's
+      // debounce window would be cut short. The loader is about to relaunch
+      // every one of them, so they should go down properly first.
+      await loader.gracefulClose();
+
       loader.exitForUpgrade();
 
     } catch (error) {

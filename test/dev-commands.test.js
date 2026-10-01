@@ -262,7 +262,7 @@ describe('.upgrade', () => {
 
 describe('.shutdown', () => {
   test('a dev gets a confirmation then exit 45 (stay down)', async () => {
-    const log = fakeEngine([A]);
+    fakeEngine([A]);
     const sock = H.makeDmSock();
     const codes = await dispatchCapturingExit(
       sock,
@@ -272,15 +272,81 @@ describe('.shutdown', () => {
     assert.notEqual(codes[0], loader.QUICK_RESTART, 'must not re-sync+relaunch');
     assert.equal(sock._rec.texts.length, 1);
     assert.match(sock._rec.texts[0], /Shutting down/i);
-    assert.deepEqual(log.stops, [A], 'the socket is closed before the exit');
   });
 
-  test('closes every bot, not just one', async () => {
-    const log = fakeEngine([A, B]);
-    const sock = H.makeDmSock();
-    await dispatchCapturingExit(
-      sock, H.textMsg('.shutdown', { dm: true, remoteJid: `${DEV1}@s.whatsapp.net` }));
-    assert.deepEqual(log.stops, [A, B]);
+  test('runs the real graceful close before exiting', async () => {
+    fakeEngine([A]);
+    let closed = 0;
+    const saved = global.__JUNE_SHUTDOWN;
+    global.__JUNE_SHUTDOWN = async () => { closed++; };
+    try {
+      const sock = H.makeDmSock();
+      const codes = await dispatchCapturingExit(
+        sock, H.textMsg('.shutdown', { dm: true, remoteJid: `${DEV1}@s.whatsapp.net` }));
+      assert.equal(closed, 1, 'closeEverything() must run — this is the step that flushes the store');
+      assert.deepEqual(codes, [loader.STAY_DOWN], 'and the exit happens after it');
+    } finally {
+      if (saved === undefined) delete global.__JUNE_SHUTDOWN;
+      else global.__JUNE_SHUTDOWN = saved;
+    }
+  });
+
+  test('a close that hangs does not hold the shutdown open', async () => {
+    fakeEngine([]);
+    const saved = global.__JUNE_SHUTDOWN;
+    global.__JUNE_SHUTDOWN = () => new Promise(() => {});   // never resolves
+    try {
+      const sock = H.makeDmSock();
+      const codes = await Promise.race([
+        dispatchCapturingExit(sock, H.textMsg('.shutdown', { dm: true, remoteJid: `${DEV1}@s.whatsapp.net` })),
+        H.sleep(loader.CLOSE_TIMEOUT_MS + 3000).then(() => 'timed-out'),
+      ]);
+      assert.notEqual(codes, 'timed-out', 'the close timeout must fire well before this');
+      assert.deepEqual(codes, [loader.STAY_DOWN]);
+    } finally {
+      if (saved === undefined) delete global.__JUNE_SHUTDOWN;
+      else global.__JUNE_SHUTDOWN = saved;
+    }
+  });
+
+  test('notifies every bot owner, from their own bot', async () => {
+    fakeEngine([A, B]);
+    const dms = [];
+    const botWithSock = (id) => ({
+      id,
+      sock: { sendMessage: async (jid, content) => { dms.push({ id, jid, text: content.text }); } },
+    });
+    const realGet = sessionService.get;
+    sessionService.get = (id) => botWithSock(id);
+    try {
+      await database.runAsBot(A, async () => database.setOwners([H.OWNER]));
+      await database.runAsBot(B, async () => database.setOwners(['2348099999998']));
+      const sock = H.makeDmSock();
+      await dispatchCapturingExit(
+        sock, H.textMsg('.shutdown', { dm: true, remoteJid: `${DEV1}@s.whatsapp.net` }));
+      assert.equal(dms.length, 2, 'one DM per bot');
+      assert.deepEqual(dms.map((d) => d.jid).sort(),
+        [H.OWNER, '2348099999998@s.whatsapp.net'].sort());
+      assert.ok(dms.every((d) => /going offline/i.test(d.text)));
+    } finally {
+      sessionService.get = realGet;
+    }
+  });
+
+  test('JUNE_SHUTDOWN_NOTICE=0 silences the notification', async () => {
+    fakeEngine([A]);
+    const saved = process.env.JUNE_SHUTDOWN_NOTICE;
+    process.env.JUNE_SHUTDOWN_NOTICE = '0';
+    try {
+      const sock = H.makeDmSock();
+      await dispatchCapturingExit(
+        sock, H.textMsg('.shutdown', { dm: true, remoteJid: `${DEV1}@s.whatsapp.net` }));
+      // the dev's own confirmation is still sent; nobody else is DM'd
+      assert.equal(sock._rec.texts.length, 1);
+    } finally {
+      if (saved === undefined) delete process.env.JUNE_SHUTDOWN_NOTICE;
+      else process.env.JUNE_SHUTDOWN_NOTICE = saved;
+    }
   });
 });
 
