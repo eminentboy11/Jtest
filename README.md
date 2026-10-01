@@ -384,7 +384,7 @@ Fully web-based edition — nothing like switching mode through env.
 npm test
 ```
 
-270 tests across 16 suites, using Node's built-in runner — no test framework dependency. Runs serially (`--test-concurrency=1`) because the loader suite writes real temporary files into `commands/`.
+273 tests across 16 suites, using Node's built-in runner — no test framework dependency. Runs serially (`--test-concurrency=1`) because the loader suite writes real temporary files into `commands/`.
 
 | suite | covers |
 |---|---|
@@ -400,6 +400,8 @@ npm test
 
 `test/structure.test.js` is the one worth reading if you change the build. It exists because two npm scripts pointed at files that were not in the repo, and nothing caught it:
 
+- **only `.upgrade` and `.shutdown` can end the process** — checked transitively through local `require()`s, so a command that requires a helper that exits is still a command that exits (that is how `.clean` used to reach `index.js`'s exit sites); and neither of the two may call `process.exit()` directly, so the exit codes cannot drift from `platform/loader.js`
+- no command may require `index.js`: it runs the platform at require time, exports nothing, and is the one edge that puts every `process.exit` in the entry point within a command's reach
 - every script naming a file must point at one that exists
 - no file may be unreachable from `index.js` or `commands/` — walked to a fixpoint, because a file referenced only by other dead files is still dead
 - no relative `require()` may point at a missing file, except the three optional game modules resolved through `optionalModule()`
