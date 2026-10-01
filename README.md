@@ -19,7 +19,7 @@ Previous edition was **9MB + 700 deps (48 packages, ffmpeg, sharp, jimp, ytdl, s
 - **No JUNE_PLATFORM toggle** — always web
 - **Process commands are scoped like a multi-tenant system should be** — one process runs up to 100 bots, so anything that ends a process is a dev decision and anything a tenant may do touches their own bot only:
   - `.upgrade` — **devs only, silently ignored for everyone else.** Exits `44`, which the auto-sync loader reads as "re-sync and relaunch me": the container stays up and every bot is back in seconds with the new code on `main`
-  - `.shutdown` — **devs only, silently ignored for everyone else.** Exits `45` (stay down). Closes every bot's socket first
+  - `.shutdown` — **devs only, silently ignored for everyone else.** DMs every bot's owner first (so 99 tenants do not just watch their bot go silent), then runs the real graceful close and exits `45` (stay down)
   - `.restart` — that bot's **owner**, and it reboots **only the bot the message arrived on** (`sessionService.reconnect(botId)`); other tenants never notice. It cannot fetch new code — only `.upgrade` re-syncs. Non-owners are ignored silently
   - see **Loader protocol** below for the exit codes and the loader-side contract
 - **391 commands shipped** behind a real hot-reloading loader — drop a file in `commands/` and it registers without a restart:
@@ -208,8 +208,25 @@ process cannot restart itself, so Jtest only speaks the protocol on the way out
 | `45` | **do not relaunch me.** Shut down and stay down | `.shutdown` |
 | any other | an ordinary exit; treat it as one | crashes |
 
-The graceful close (socket teardown, ordering the JSON flush) and the re-kill
-chain live on the **loader's** side of this contract. `utils/shutdown.js` —
+### The graceful close
+
+Before either code is sent, `platform/loader.js` runs `gracefulClose()`:
+`global.__JUNE_SHUTDOWN` — registered by `index.js` — ends every bot socket
+cleanly, flushes the group counters, writes every bot's JSON store
+synchronously, releases the HTTP server and closes the command watcher. It is
+guarded by a 10 s timeout and is fail-open, so a stuck or missing routine can
+never turn a shutdown into a non-shutdown.
+
+`utils/shutdown.js` *described* this step but could never run it: `index.js`
+never registered the global it looked for, so every shutdown in this repo
+exited raw, mid-debounce. The registration exists now, and a boot test boots
+the real `index.js` and confirms SIGTERM runs the routine.
+
+`.shutdown` also DMs every bot's owner before closing, bounded by
+`JUNE_SHUTDOWN_NOTICE_MS` (default 8000) and disableable with
+`JUNE_SHUTDOWN_NOTICE=0`.
+
+The re-kill chain lives on the **loader's** side of this contract. `utils/shutdown.js` —
 which used to hold them — was deleted, along with its
 `database/shutdown-state.json` state file. It was the right idea in the wrong
 process: it had the bot kill *itself* three boots in a row to outlast a
@@ -384,7 +401,7 @@ Fully web-based edition — nothing like switching mode through env.
 npm test
 ```
 
-273 tests across 16 suites, using Node's built-in runner — no test framework dependency. Runs serially (`--test-concurrency=1`) because the loader suite writes real temporary files into `commands/`.
+276 tests across 16 suites, using Node's built-in runner — no test framework dependency. Runs serially (`--test-concurrency=1`) because the loader suite writes real temporary files into `commands/`.
 
 | suite | covers |
 |---|---|
